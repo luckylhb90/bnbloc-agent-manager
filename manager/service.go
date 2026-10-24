@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -50,6 +51,9 @@ type Service struct {
 
 	// Settings are the settings as last read.
 	Settings Settings
+	// eff is the catalog in effect: Catalog with the agents the settings add
+	// (config.go). Read through cat().
+	eff atomic.Pointer[Catalog]
 
 	mu          sync.Mutex
 	state       State
@@ -88,7 +92,7 @@ func (s *Service) Init() error {
 }
 
 func (s *Service) loadSettings() {
-	set, err := ReadSettings(s.SettingsFile, s.Catalog)
+	set, eff, err := ReadSettings(s.SettingsFile, s.Catalog)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
@@ -97,6 +101,16 @@ func (s *Service) loadSettings() {
 	}
 	s.settingsErr = ""
 	s.Settings = set
+	s.eff.Store(eff)
+}
+
+// cat is the catalog in effect: what the build carries, and the agents the
+// settings added.
+func (s *Service) cat() *Catalog {
+	if c := s.eff.Load(); c != nil {
+		return c
+	}
+	return s.Catalog
 }
 
 // agentState returns the record of an agent, made when absent. Caller holds
@@ -121,8 +135,8 @@ func (s *Service) mutate(f func(st *State)) error {
 // RefreshDetected looks at the computer again for every agent.
 func (s *Service) RefreshDetected(ctx context.Context) {
 	found := map[string]Detected{}
-	for i := range s.Catalog.Agents {
-		e := &s.Catalog.Agents[i]
+	for i := range s.cat().Agents {
+		e := &s.cat().Agents[i]
 		if e.RunsHere() {
 			found[e.ID] = s.detect(ctx, e)
 		}
@@ -165,8 +179,8 @@ func (s *Service) Run(ctx context.Context) {
 
 // CheckAll looks for a newer version of every agent that has a source.
 func (s *Service) CheckAll(ctx context.Context) {
-	for i := range s.Catalog.Agents {
-		e := &s.Catalog.Agents[i]
+	for i := range s.cat().Agents {
+		e := &s.cat().Agents[i]
 		if e.RunsHere() && e.Package() != "" {
 			if err := s.check(ctx, e); err != nil {
 				log.Printf("agent-manager: check %s: %v", e.ID, err)
@@ -185,8 +199,8 @@ func (s *Service) autoUpdate() {
 	if !on {
 		return
 	}
-	for i := range s.Catalog.Agents {
-		e := &s.Catalog.Agents[i]
+	for i := range s.cat().Agents {
+		e := &s.cat().Agents[i]
 		v := s.agentView(e)
 		if v.Managed == nil || !v.Can.Update || !v.UpdateAvailable || v.Op != nil && v.Op.Running {
 			continue
@@ -210,7 +224,7 @@ var ErrBusy = errors.New("another operation is running for this agent")
 // Begin starts an action in the background and returns at once; the page
 // reads the outcome from the snapshot.
 func (s *Service) Begin(id, action string) error {
-	e, ok := s.Catalog.Entry(id)
+	e, ok := s.cat().Entry(id)
 	if !ok {
 		return fmt.Errorf("no agent %q in the catalog", id)
 	}
@@ -224,7 +238,7 @@ func (s *Service) Begin(id, action string) error {
 
 // Do runs an action to its end (the command line).
 func (s *Service) Do(ctx context.Context, id, action string, onLine func(string)) error {
-	e, ok := s.Catalog.Entry(id)
+	e, ok := s.cat().Entry(id)
 	if !ok {
 		return fmt.Errorf("no agent %q in the catalog", id)
 	}

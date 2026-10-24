@@ -28,6 +28,9 @@ type Catalog struct {
 type Entry struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Source says who added a configured entry ("" for the catalog's own):
+	// shown on its row. Never read from a catalog file.
+	Source string `json:"-"`
 	// For names the agent this entry serves: the ACP adapter an agent needs
 	// for rooms is its own entry (its own install, version and registration),
 	// shown under the agent the member knows.
@@ -134,6 +137,25 @@ var (
 
 // DefaultCatalog parses the catalog the binary ships.
 func DefaultCatalog() (*Catalog, error) { return ParseCatalog(embeddedCatalog) }
+
+// With returns the catalog with another one's agents added: the way an
+// organization's build carries entries of its own beside the public ones (it is
+// a build, signed as its own package, never a setting). The result is validated
+// as one catalog, so an id or a registered name taken twice, or an adapter of an
+// agent that does not exist, is refused.
+func (c *Catalog) With(extra []byte) (*Catalog, error) {
+	var more Catalog
+	dec := json.NewDecoder(strings.NewReader(string(extra)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&more); err != nil {
+		return nil, fmt.Errorf("catalog: %w", err)
+	}
+	raw, err := json.Marshal(Catalog{Version: c.Version + "+" + more.Version, Agents: append(append([]Entry(nil), c.Agents...), more.Agents...)})
+	if err != nil {
+		return nil, err
+	}
+	return ParseCatalog(raw)
+}
 
 // ParseCatalog decodes and validates a catalog; an invalid one is an error,
 // never a partial list.

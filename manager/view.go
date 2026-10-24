@@ -48,7 +48,10 @@ type AgentView struct {
 	Name string `json:"name"`
 	// For is the agent this row is the ACP adapter of (shown under it);
 	// Adapter is, on an agent, the id of its adapter row.
-	For     string `json:"for,omitempty"`
+	For string `json:"for,omitempty"`
+	// Source says who added the row ("you", "your organization"); empty for
+	// the catalog's own.
+	Source  string `json:"source,omitempty"`
 	Adapter string `json:"adapter,omitempty"`
 	// Status: "unsupported" (not for this OS), "blocked" (the organization
 	// does not offer it), "absent", "installed".
@@ -85,7 +88,7 @@ func (s *Service) Snapshot() Snapshot {
 	s.mu.Lock()
 	snap := Snapshot{
 		Component:      s.Version,
-		CatalogVersion: s.Catalog.Version,
+		CatalogVersion: s.cat().Version,
 		Detecting:      s.detectedAt.IsZero(),
 		Settings:       SettingView{HoldDays: s.Settings.HoldDays, AutoUpdate: s.Settings.AutoUpdate},
 		Notes:          append([]string(nil), s.Settings.Notes...),
@@ -94,8 +97,8 @@ func (s *Service) Snapshot() Snapshot {
 		snap.Notes = append(snap.Notes, "settings: "+s.settingsErr)
 	}
 	s.mu.Unlock()
-	for i := range s.Catalog.Agents {
-		snap.Agents = append(snap.Agents, s.agentView(&s.Catalog.Agents[i]))
+	for i := range s.cat().Agents {
+		snap.Agents = append(snap.Agents, s.agentView(&s.cat().Agents[i]))
 	}
 	return snap
 }
@@ -114,7 +117,7 @@ func (s *Service) agentView(e *Entry) AgentView {
 	s.mu.Unlock()
 
 	v := AgentView{
-		ID: e.ID, Name: e.Name, For: e.For, Adapter: s.adapterOf(e.ID), Pinned: pin, HasACP: e.Register != nil,
+		ID: e.ID, Name: e.Name, For: e.For, Source: e.Source, Adapter: s.adapterOf(e.ID), Pinned: pin, HasACP: e.Register != nil,
 		InstallHint: e.InstallHint, SignIn: e.SignIn,
 		Latest: a.Latest, CheckedAt: a.CheckedAt, CheckError: a.CheckErr,
 		Registered: a.Registered && e.Register != nil,
@@ -262,9 +265,9 @@ type sizeEntry struct {
 
 // adapterOf is the id of the entry that is the adapter of agent id ("" none).
 func (s *Service) adapterOf(id string) string {
-	for i := range s.Catalog.Agents {
-		if s.Catalog.Agents[i].For == id {
-			return s.Catalog.Agents[i].ID
+	for i := range s.cat().Agents {
+		if s.cat().Agents[i].For == id {
+			return s.cat().Agents[i].ID
 		}
 	}
 	return ""

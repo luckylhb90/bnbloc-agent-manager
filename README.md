@@ -61,6 +61,27 @@ bnbloc-agent-manager serve --page      # the API, and the page at /  (developmen
 `--data-dir`, `--acp-home` and `--settings` default to the user config folder,
 the ACP core's home and none.
 
+## Configuring more agents
+
+Two settings add agents without a new build (Components → Settings), one agent
+per line as JSON:
+
+- **My own agents** (`myAgents`, a member's, kept on their computer): a command
+  name or an absolute path, version arguments and how to read the version, an
+  update command and its arguments (the page shows the exact command before the
+  click), and an ACP launch line to give it to rooms. A line with the id of a
+  catalog agent and only `command` and `versionArgs` points that agent at another
+  command or path (an agent installed where no PATH reaches).
+- **More agents to recognise** (`orgAgents`, an organization's, for every member):
+  recognition only, a bare command name and one version flag (`--version`, `-v`,
+  `-V`, `version`), and words for the member. No update command, no ACP launch
+  line, and no change to a catalog entry: a setting must not make members'
+  computers run what an admin typed. An organization that needs entries that run
+  commands makes its own build of the manager (`Catalog.With`, package `app`) and
+  signs it as its own package.
+
+A line that does not fit is named on the page and left out.
+
 ## Catalog
 
 `manager/catalog.json`: typed entries (an npm package and its command, how a

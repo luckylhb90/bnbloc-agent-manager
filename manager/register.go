@@ -39,8 +39,8 @@ type dropIn struct {
 func (s *Service) registration() dropIn {
 	out := dropIn{Agents: []dropInEntry{}}
 	set := s.Settings
-	for i := range s.Catalog.Agents {
-		e := &s.Catalog.Agents[i]
+	for i := range s.cat().Agents {
+		e := &s.cat().Agents[i]
 		a := s.state.Agents[e.ID]
 		if e.Register == nil || a == nil || !a.Registered || !e.RunsHere() || !set.Allows(e.ID) {
 			continue

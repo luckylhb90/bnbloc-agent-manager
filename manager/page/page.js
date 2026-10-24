@@ -76,6 +76,7 @@ function detail(a) {
     bits.push("Found on this computer" + (k && k !== "unknown" ? " (" + k.replace("-", " ") + ")" : "") + ": " + a.external.path);
     if (a.pinned) bits.push("pinned by your organization to " + a.pinned);
   }
+  if (a.source) bits.push("added by " + a.source);
   if (a.checkError && a.status === "installed") bits.push("couldn’t look for a newer version: " + a.checkError);
   return bits.length ? h("div", { class: "detail" }, bits.join(" · ")) : null;
 }

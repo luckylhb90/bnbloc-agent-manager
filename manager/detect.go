@@ -79,10 +79,18 @@ func classify(e *Entry, path, storeDir string) (kind, owner string) {
 			return f.Kind, f.Owner
 		}
 	}
-	if e.Install != nil && strings.Contains(p, "/node_modules/") {
+	if e.Install != nil && inNPMGlobal(p) {
 		return KindNPMGlobal, ""
 	}
 	return KindUnknown, ""
+}
+
+// inNPMGlobal reports a path inside an npm global prefix: <prefix>/lib/node_modules
+// (Unix) or <prefix>/npm/node_modules (Windows). A node_modules anywhere else
+// is a project's own (a tool that carries its copy), which `npm install -g`
+// would not update, so it is not a global install.
+func inNPMGlobal(p string) bool {
+	return strings.Contains(p, "/lib/node_modules/") || strings.Contains(p, "/npm/node_modules/")
 }
 
 func normPath(p string) string {

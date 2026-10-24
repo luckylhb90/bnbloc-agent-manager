@@ -210,6 +210,36 @@ func TestAnAdapterIsAnEntryOfItsOwnUnderAnAgent(t *testing.T) {
 	}
 }
 
+func TestAnOrganizationsBuildAddsEntriesBesideThePublicOnes(t *testing.T) {
+	base, err := DefaultCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := base.With([]byte(`{"version":"org","agents":[{"id":"house","name":"House agent","detect":{"command":"house","args":["--version"]},"found":[{"kind":"own","contains":"/house/"}],"update":[{"kind":"own","args":["update"]}]},{"id":"house-acp","name":"Adapter","for":"claude","detect":{"command":"x"}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Agents) != len(base.Agents)+2 || merged.Version != base.Version+"+org" {
+		t.Errorf("merged: %d agents, version %q", len(merged.Agents), merged.Version)
+	}
+	if _, ok := merged.Entry("house"); !ok {
+		t.Error("the house agent is there")
+	}
+	if len(base.Agents) == len(merged.Agents) {
+		t.Error("the base catalog is not changed")
+	}
+	for name, extra := range map[string]string{
+		"an id taken":      `{"version":"o","agents":[{"id":"gemini","name":"Dup","detect":{"command":"d"}}]}`,
+		"a name taken":     `{"version":"o","agents":[{"id":"mine","name":"M","detect":{"command":"m"},"register":{"name":"gemini"}}]}`,
+		"an unknown field": `{"version":"o","agents":[],"x":1}`,
+		"a shell method":   `{"version":"o","agents":[{"id":"mine","name":"M","install":{"method":"script","package":"x","bin":"x"},"detect":{"command":"m"}}]}`,
+	} {
+		if _, err := base.With([]byte(extra)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
 func TestCatalogRefusesWhatItCannotVerify(t *testing.T) {
 	cases := map[string]string{
 		"a shell-string method":    `{"id":"a","name":"A","install":{"method":"script","package":"x","bin":"x"},"detect":{"command":"a"}}`,
@@ -236,7 +266,7 @@ func TestSettingsKeepWhatIsValidAndNameWhatIsNot(t *testing.T) {
 	cat, _ := ParseCatalog([]byte(testCatalog))
 	path := filepath.Join(t.TempDir(), "s.json")
 	_ = os.WriteFile(path, []byte(`{"allowed":["fake","nope"],"pinned":["fake@1.2.3","fake@latest","ghost@1.0.0","bad"],"holdDays":"3","autoUpdate":"on"}`), 0o600)
-	s, err := ReadSettings(path, cat)
+	s, _, err := ReadSettings(path, cat)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +279,7 @@ func TestSettingsKeepWhatIsValidAndNameWhatIsNot(t *testing.T) {
 	if s.Allows("ext") || !s.Allows("fake") {
 		t.Error("an allowed list offers only its agents")
 	}
-	if _, err := ReadSettings(filepath.Join(t.TempDir(), "missing.json"), cat); err == nil {
+	if _, _, err := ReadSettings(filepath.Join(t.TempDir(), "missing.json"), cat); err == nil {
 		t.Error("a named settings file that cannot be read is an error")
 	}
 }
@@ -748,6 +778,161 @@ func TestTheOperationLogNeverCarriesTheEnvironment(t *testing.T) {
 	for _, l := range view(svc, "fake").Op.Log {
 		if strings.Contains(l, "hunter2") {
 			t.Fatalf("a log line carries the environment: %q", l)
+		}
+	}
+}
+
+// writeSettings writes a component settings file and points the service at it.
+func writeSettings(t *testing.T, svc *Service, values map[string]any) {
+	t.Helper()
+	raw, _ := json.Marshal(values)
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc.SettingsFile = path
+	svc.loadSettings()
+}
+
+func TestAMemberAddsAnAgentOfTheirOwnWithItsUpdater(t *testing.T) {
+	dir := foundAgent(t, "houseagent", "housebin", "1.0.0")
+	svc := newService(t, testCatalog, nil)
+	writeSettings(t, svc, map[string]any{"myAgents": []string{
+		`{"id":"house","name":"House agent","command":"houseagent","versionArgs":["--version"],"updateArgs":["upgrade"],"acpArgs":["acp"],"signIn":"Run it once."}`,
+	}})
+	svc.RefreshDetected(context.Background())
+	v := view(svc, "house")
+	if v.Name != "House agent" || v.Source != SourceMember || v.External == nil || v.External.Version != "1.0.0" || v.External.Kind != configuredKind {
+		t.Fatalf("a configured agent is found like any: %+v", v)
+	}
+	if !v.Can.Update || !v.UpdateUnknown || !strings.HasSuffix(v.UpdateCommand, "houseagent upgrade") || !v.HasACP {
+		t.Fatalf("its updater is shown before the click: %+v", v)
+	}
+	if err := do(t, svc, "house", ActUpdate); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "version")); strings.TrimSpace(string(got)) != "2.0.0" {
+		t.Errorf("its own updater ran: %q", got)
+	}
+	// Given to rooms only by the member's click, under the id's name.
+	if _, ok := readDropIn(t, svc); ok {
+		t.Fatal("finding registers nothing")
+	}
+	if err := do(t, svc, "house", ActRegister); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := readDropIn(t, svc); len(d.Agents) != 1 || d.Agents[0].Name != "house" || d.Agents[0].Args[0] != "acp" {
+		t.Errorf("registered with the line's launch args: %+v", d)
+	}
+}
+
+func TestAMemberPointsABuiltInAgentAtAnotherCommandAndNothingElse(t *testing.T) {
+	foundAgent(t, "ext", "elsewhere", "3.1.4")
+	other := filepath.Join(t.TempDir(), "ext") // an absolute path, a place that is not on the PATH
+	_ = os.WriteFile(other, []byte("#!/bin/sh\necho ext 9.9.9\n"), 0o755)
+	svc := newService(t, testCatalog, nil)
+	writeSettings(t, svc, map[string]any{"myAgents": []string{
+		`{"id":"ext","command":"` + other + `","versionArgs":["--version"]}`,
+		`{"id":"nopin","command":"x","updateArgs":["rm","-rf"]}`,
+	}})
+	svc.RefreshDetected(context.Background())
+	v := view(svc, "ext")
+	if v.Source != SourceMember || v.External == nil || v.External.Version != "9.9.9" || v.External.Path == "" {
+		t.Fatalf("the agent is found where the member said: %+v", v)
+	}
+	if !strings.Contains(strings.Join(svc.Snapshot().Notes, "\n"), `"nopin" is already an agent`) {
+		t.Errorf("a line that does more than point an agent elsewhere is refused and said: %v", svc.Snapshot().Notes)
+	}
+	if view(svc, "nopin").Source != "" {
+		t.Error("the built-in entry is unchanged by a refused line")
+	}
+}
+
+func TestAnOrganizationAddsAgentsToRecogniseAndNeverToRun(t *testing.T) {
+	foundAgent(t, "orgagent", "orgbin", "5.0.0")
+	svc := newService(t, testCatalog, nil)
+	writeSettings(t, svc, map[string]any{"orgAgents": []string{
+		`{"id":"corp","name":"Corp CLI","command":"orgagent","installHint":"Install it from the portal."}`,
+		`{"id":"corp-flag","command":"orgagent","versionArgs":["-v"]}`,
+		// Everything below must be refused: each would make members' computers run what an admin typed.
+		`{"id":"bad-update","command":"orgagent","updateArgs":["update"]}`,
+		`{"id":"bad-cmd","command":"orgagent","updateCommand":"brew","updateArgs":["upgrade"]}`,
+		`{"id":"bad-acp","command":"orgagent","acpArgs":["acp"]}`,
+		`{"id":"bad-args","command":"orgagent","versionArgs":["-c","id"]}`,
+		`{"id":"bad-path","command":"/bin/sh"}`,
+		`{"id":"fake","command":"orgagent"}`,
+		`{"id":"bad-field","command":"orgagent","run":"x"}`,
+		`not json`,
+	}})
+	svc.RefreshDetected(context.Background())
+	corp := view(svc, "corp")
+	if corp.Source != SourceOrg || corp.External == nil || corp.External.Version != "5.0.0" || corp.Can.Update || corp.Can.Register {
+		t.Fatalf("recognised, with nothing to run: %+v", corp)
+	}
+	if view(svc, "corp-flag").Name == "" || view(svc, "corp-flag").Source != SourceOrg {
+		t.Error("an allowed version flag is accepted")
+	}
+	for _, id := range []string{"bad-update", "bad-cmd", "bad-acp", "bad-args", "bad-path", "bad-field"} {
+		if view(svc, id).ID != "" {
+			t.Errorf("%s was accepted", id)
+		}
+	}
+	if view(svc, "fake").Source != "" {
+		t.Error("an organization cannot change a catalog entry")
+	}
+	notes := strings.Join(svc.Snapshot().Notes, "\n")
+	for _, want := range []string{"cannot set an update command", "ACP launch line", "version argument", "bare command name", `"fake" is already an agent`, "known fields", "not a JSON object"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("a refused line is named (%q): %s", want, notes)
+		}
+	}
+}
+
+func TestConfiguredAgentsFollowTheOrganizationsOwnPolicy(t *testing.T) {
+	foundAgent(t, "orgagent", "orgbin", "5.0.0")
+	svc := newService(t, testCatalog, nil)
+	writeSettings(t, svc, map[string]any{
+		"orgAgents": []string{`{"id":"corp","command":"orgagent"}`},
+		"allowed":   []string{"corp"},
+		"pinned":    []string{"corp@5.0.0", "ghost@1.0.0"},
+	})
+	svc.RefreshDetected(context.Background())
+	if v := view(svc, "fake"); v.Status != "blocked" {
+		t.Errorf("an allowed list that names a configured agent offers only it: %+v", v)
+	}
+	if v := view(svc, "corp"); v.Status != "installed" || v.Pinned != "5.0.0" {
+		t.Errorf("a configured agent may be allowed and pinned: %+v", v)
+	}
+	if !strings.Contains(strings.Join(svc.Snapshot().Notes, "\n"), "ghost") {
+		t.Error("a pin of an agent nobody defined is named")
+	}
+}
+
+func TestAConfiguredLineNeverRunsAtParseTime(t *testing.T) {
+	// Parsing and applying lines runs nothing; only a version check on a found
+	// command does, with the arguments the rules above allow.
+	marker := filepath.Join(t.TempDir(), "ran")
+	cat, _ := ParseCatalog([]byte(testCatalog))
+	_, notes := cat.WithConfigured([]string{`{"id":"x","command":"touch","versionArgs":["` + marker + `"]}`}, nil)
+	if _, err := os.Stat(marker); err == nil || len(notes) == 0 {
+		t.Errorf("an organization's arguments are refused and nothing ran: %v", notes)
+	}
+}
+
+func TestOnlyANpmGlobalPrefixCountsAsAGlobalInstall(t *testing.T) {
+	e := &Entry{ID: "x", Install: &Install{Method: "npm", Package: "x", Bin: "x"}}
+	store := "/data/store"
+	for path, want := range map[string]string{
+		"/home/u/.local/share/mise/installs/node/24/lib/node_modules/@openai/codex/bin/codex.js": KindNPMGlobal,
+		"/usr/local/lib/node_modules/x/bin/x.js":                                                 KindNPMGlobal,
+		"C:/Users/u/AppData/Roaming/npm/node_modules/x/bin/x.js":                                 KindNPMGlobal,
+		// A tool's own copy inside its project: `npm install -g` would not update it.
+		"/home/u/.local/share/other-tool/pi/node_modules/@scope/x/dist/cli.js": KindUnknown,
+		"/work/project/node_modules/x/bin/x.js":                                KindUnknown,
+		"/data/store/agents/x/1.0.0/node_modules/x/bin/x.js":                   KindManaged,
+	} {
+		if got, _ := classify(e, path, store); got != want {
+			t.Errorf("%s: %s, want %s", path, got, want)
 		}
 	}
 }

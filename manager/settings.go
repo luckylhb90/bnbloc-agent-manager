@@ -26,25 +26,31 @@ type Settings struct {
 	Pinned     map[string]string
 	HoldDays   int
 	AutoUpdate bool
+	// OrgAgents and MemberAgents are the lines of configured agents
+	// (config.go).
+	OrgAgents    []string
+	MemberAgents []string
 	// Notes name every line that was ignored and why, shown on the page: a
 	// setting is never dropped silently.
 	Notes []string
 }
 
-// ReadSettings reads the settings file. An empty path is no settings; a file
-// that is named but unreadable is an error.
-func ReadSettings(path string, c *Catalog) (Settings, error) {
+// ReadSettings reads the settings file against the base catalog and answers
+// the settings with the effective catalog: the base and the agents the settings
+// configure. An empty path is no settings; a file that is named but unreadable
+// is an error.
+func ReadSettings(path string, base *Catalog) (Settings, *Catalog, error) {
 	s := Settings{Pinned: map[string]string{}}
 	if path == "" {
-		return s, nil
+		return s, base, nil
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return s, fmt.Errorf("component settings file: %w", err)
+		return s, base, fmt.Errorf("component settings file: %w", err)
 	}
 	var values map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &values); err != nil {
-		return s, errors.New("component settings file: not a JSON object")
+		return s, base, errors.New("component settings file: not a JSON object")
 	}
 	lines := func(key string) []string {
 		var out []string
@@ -60,6 +66,9 @@ func ReadSettings(path string, c *Catalog) (Settings, error) {
 		}
 		return strings.TrimSpace(out)
 	}
+	s.OrgAgents, s.MemberAgents = lines(SettingOrgAgents), lines(SettingMyAgents)
+	c, notes := base.WithConfigured(s.OrgAgents, s.MemberAgents)
+	s.Notes = append(s.Notes, notes...)
 	for _, id := range lines(SettingAllowed) {
 		id = strings.TrimSpace(id)
 		if id == "" {
@@ -93,7 +102,7 @@ func ReadSettings(path string, c *Catalog) (Settings, error) {
 		}
 	}
 	s.AutoUpdate = str(SettingAutoUpdate) == "on"
-	return s, nil
+	return s, c, nil
 }
 
 // Allows reports whether the organization offers the agent.
