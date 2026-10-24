@@ -70,6 +70,7 @@ function detail(a) {
   if (a.managed) {
     bits.push("Managed here · " + mb(a.managed.sizeBytes));
     if (a.managed.previous) bits.push("earlier version " + a.managed.previous + " kept");
+    if (a.managed.held && a.managed.held.length) bits.push("kept for a room still using " + a.managed.held.join(", ") + " (removed when it no longer needs it)");
     if (a.pinned) bits.push("pinned by your organization to " + a.pinned);
   } else if (a.external) {
     const k = a.external.kind;

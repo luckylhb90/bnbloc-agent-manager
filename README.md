@@ -27,6 +27,14 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
   checked (the command must report the version asked for) before anything points
   at it. The npm cache is its own; your global packages are untouched. Never
   elevated.
+- **A room's conversation is never lost to an update.** A session keeps the
+  program it was created with, and continues with it after an idle stop. An old
+  version is therefore removed only when no live session needs it: the ACP core
+  (0.2.12 or newer) publishes what its sessions run from, and a version it lists
+  stays (the page says "kept for a room still using …"). With no word from the
+  core (an older core, or none has run) nothing is removed. Remove is refused
+  while a room still runs the agent. If a file is gone anyway, the core continues
+  the conversation with the agent's current version and says so in its log.
 - **Update** installs the new version beside the old, checks it, then switches
   the registration. **Roll back** switches it back (the previous version is
   kept). A running agent keeps running from its old files; nothing is signalled.

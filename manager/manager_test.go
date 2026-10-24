@@ -1173,3 +1173,148 @@ func TestTheSettingsHelpCarriesAWorkingExample(t *testing.T) {
 		t.Errorf("both configurable settings are declared, found %d", seen)
 	}
 }
+
+// writeInUse is what the ACP core publishes: the paths its live sessions hold.
+func writeInUse(t *testing.T, svc *Service, updated time.Time, stopped bool, refs ...string) {
+	t.Helper()
+	_ = os.MkdirAll(svc.ACPHome, 0o755)
+	doc := map[string]any{"pid": 1, "updatedAtMs": updated.UnixMilli(), "stopped": stopped,
+		"sessions": []map[string]any{{"agent": "fake", "refs": refs}}}
+	raw, _ := json.Marshal(doc)
+	if err := os.WriteFile(filepath.Join(svc.ACPHome, "in-use.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func versionDirs(svc *Service, id string) []string {
+	entries, _ := os.ReadDir(svc.Store.agentDir(id))
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// installAt installs fake-agent at a version through the manager (a registry
+// whose latest is v) and returns the command a session created then would hold.
+func installOrUpdateTo(t *testing.T, svc *Service, v string) {
+	t.Helper()
+	reg := newRegistry(t, registryOpts{latest: v, times: map[string]string{v: "2026-01-01T00:00:00Z"}})
+	svc.RegistryURL, svc.HTTP = reg.URL, reg.Client()
+	action := ActUpdate
+	if cur, _ := svc.managedVersion("fake"); cur == "" {
+		action = ActInstall
+	}
+	if err := do(t, svc, "fake", action); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A room's conversation continues, after an idle stop, with the program it was
+// created with, so an update must not remove a version a session still holds
+// (reproduced against the real core: two updates and the third version's cleanup
+// lost the conversation).
+func TestAnUpdateKeepsTheVersionARoomStillRuns(t *testing.T) {
+	fakeNPM(t)
+	svc := newService(t, testCatalog, nil)
+	installOrUpdateTo(t, svc, "1.0.0")
+	held := binPath(svc.Store.versionDir("fake", "1.0.0"), "fakeagent")
+	writeInUse(t, svc, time.Now(), false, held, "/not/a/store/path")
+
+	installOrUpdateTo(t, svc, "1.1.0")
+	installOrUpdateTo(t, svc, "1.2.0") // 1.0.0 is neither current nor the rollback target now
+	installOrUpdateTo(t, svc, "1.3.0")
+	got := strings.Join(versionDirs(svc, "fake"), " ")
+	if got != "1.0.0 1.2.0 1.3.0" {
+		t.Fatalf("1.0.0 is held by a session, 1.2.0 is the rollback target, 1.1.0 goes: %q", got)
+	}
+	if v := view(svc, "fake"); v.Managed == nil || strings.Join(v.Managed.Held, ",") != "1.0.0" {
+		t.Errorf("the row says why 1.0.0 stays: %+v", v.Managed)
+	}
+
+	// The session ends (the core renews its file with no session): the next pass
+	// releases the version.
+	writeInUse(t, svc, time.Now(), false)
+	svc.gcAll()
+	if got := strings.Join(versionDirs(svc, "fake"), " "); got != "1.2.0 1.3.0" {
+		t.Errorf("a released version is removed: %q", got)
+	}
+}
+
+func TestWithNoWordFromTheCoreNothingIsRemoved(t *testing.T) {
+	fakeNPM(t)
+	svc := newService(t, testCatalog, nil)
+	for _, v := range []string{"1.0.0", "1.1.0", "1.2.0", "1.3.0"} {
+		installOrUpdateTo(t, svc, v)
+	}
+	// No in-use file: a core that predates it, or none has run. Its sessions
+	// cannot be seen, so every version stays.
+	if got := strings.Join(versionDirs(svc, "fake"), " "); got != "1.0.0 1.1.0 1.2.0 1.3.0" {
+		t.Errorf("unknown means keep: %q", got)
+	}
+	_ = os.MkdirAll(svc.ACPHome, 0o755)
+	_ = os.WriteFile(filepath.Join(svc.ACPHome, "in-use.json"), []byte("{not json"), 0o600)
+	svc.gcAll()
+	if got := strings.Join(versionDirs(svc, "fake"), " "); got != "1.0.0 1.1.0 1.2.0 1.3.0" {
+		t.Errorf("a file that cannot be read is no word either: %q", got)
+	}
+}
+
+func TestACoreThatStoppedOrWentSilentReleasesItsVersions(t *testing.T) {
+	fakeNPM(t)
+	svc := newService(t, testCatalog, nil)
+	for _, v := range []string{"1.0.0", "1.1.0", "1.2.0"} {
+		installOrUpdateTo(t, svc, v)
+	}
+	held := binPath(svc.Store.versionDir("fake", "1.0.0"), "fakeagent")
+	// Killed: it left the file behind and stopped renewing it; its sessions died with it.
+	writeInUse(t, svc, time.Now().Add(-time.Hour), false, held)
+	svc.gcAll()
+	if got := strings.Join(versionDirs(svc, "fake"), " "); got != "1.1.0 1.2.0" {
+		t.Errorf("a silent core holds nothing: %q", got)
+	}
+	// Exited cleanly (stopped): no session is alive, whatever the file lists.
+	installOrUpdateTo(t, svc, "1.3.0")
+	writeInUse(t, svc, time.Now(), true, binPath(svc.Store.versionDir("fake", "1.1.0"), "fakeagent"))
+	svc.gcAll()
+	if got := strings.Join(versionDirs(svc, "fake"), " "); got != "1.2.0 1.3.0" {
+		t.Errorf("a stopped core holds nothing: %q", got)
+	}
+}
+
+// An adapter may be told where its agent is by an environment value (pi-acp runs
+// pi from PI_ACP_PI_COMMAND): a session of the adapter holds the agent's version
+// too, and the core lists every path of the launch.
+func TestAVersionNamedInASessionsEnvironmentIsHeld(t *testing.T) {
+	fakeNPM(t)
+	svc := newService(t, testCatalog, nil)
+	installOrUpdateTo(t, svc, "1.0.0")
+	envRef := binPath(svc.Store.versionDir("fake", "1.0.0"), "fakeagent")
+	writeInUse(t, svc, time.Now(), false, "/some/adapter/bin", envRef)
+	installOrUpdateTo(t, svc, "1.1.0")
+	installOrUpdateTo(t, svc, "1.2.0")
+	if !strings.Contains(strings.Join(versionDirs(svc, "fake"), " "), "1.0.0") {
+		t.Errorf("a path in the launch's environment holds its version: %v", versionDirs(svc, "fake"))
+	}
+}
+
+func TestRemoveIsRefusedWhileARoomStillRunsTheAgent(t *testing.T) {
+	fakeNPM(t)
+	svc := newService(t, testCatalog, nil)
+	installOrUpdateTo(t, svc, "1.0.0")
+	writeInUse(t, svc, time.Now(), false, binPath(svc.Store.versionDir("fake", "1.0.0"), "fakeagent"))
+	err := do(t, svc, "fake", ActRemove)
+	if err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("remove while a conversation runs from it: %v", err)
+	}
+	if v := view(svc, "fake"); v.Managed == nil || v.Managed.Version != "1.0.0" {
+		t.Error("and nothing was removed")
+	}
+	if _, err := os.Stat(svc.Store.versionDir("fake", "1.0.0")); err != nil {
+		t.Error("the files are still there")
+	}
+	writeInUse(t, svc, time.Now(), true)
+	if err := do(t, svc, "fake", ActRemove); err != nil {
+		t.Errorf("after the core stopped: %v", err)
+	}
+}

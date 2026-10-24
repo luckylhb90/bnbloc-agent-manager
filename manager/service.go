@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -171,6 +172,7 @@ func (s *Service) Run(ctx context.Context) {
 			s.RefreshDetected(ctx)
 		case <-check.C:
 			s.CheckAll(ctx)
+			s.gcAll() // versions a session held are released once it ends
 			s.autoUpdate()
 			check.Reset(every)
 		}
@@ -510,7 +512,7 @@ func (s *Service) updateManaged(ctx context.Context, op *operation, e *Entry, cu
 	}); err != nil {
 		return err
 	}
-	s.Store.Prune(e.ID, v, cur)
+	s.gc(e.ID)
 	return nil
 }
 
@@ -603,6 +605,9 @@ func (s *Service) doRemove(op *operation, e *Entry) error {
 	cur, _ := s.managedVersion(e.ID)
 	if cur == "" {
 		return errors.New("the manager did not install this agent and does not remove it")
+	}
+	if held := s.heldVersions(e.ID); len(held) > 0 {
+		return fmt.Errorf("a room is still running %s %s: removing it now would end that conversation. A room keeps its agent until the app restarts, so remove it then", e.Name, strings.Join(held, ", "))
 	}
 	op.logf("removing %s", e.Name)
 	if err := s.mutate(func(st *State) {

@@ -30,6 +30,9 @@ type Managed struct {
 	Previous    string    `json:"previous,omitempty"`
 	InstalledAt time.Time `json:"installedAt,omitzero"`
 	SizeBytes   int64     `json:"sizeBytes"`
+	// Held are versions kept (beyond the current and the previous one) because a
+	// room's conversation still runs from them.
+	Held []string `json:"held,omitempty"`
 }
 
 // Can lists what the page may offer for the row.
@@ -142,7 +145,7 @@ func (s *Service) agentView(e *Entry) AgentView {
 
 	managed := a.Version != ""
 	if managed {
-		v.Managed = &Managed{Version: a.Version, Previous: a.Previous, InstalledAt: a.InstalledAt, SizeBytes: s.size(e.ID, a.Version, a.Previous)}
+		v.Managed = &Managed{Version: a.Version, Previous: a.Previous, InstalledAt: a.InstalledAt, SizeBytes: s.size(e.ID, a.Version, a.Previous), Held: held(s.heldVersions(e.ID), a.Version, a.Previous)}
 		if a.Previous != "" {
 			if _, err := os.Stat(s.Store.versionDir(e.ID, a.Previous)); err != nil {
 				v.Managed.Previous = ""
@@ -282,4 +285,16 @@ func (s *Service) adapterOf(id string) string {
 		}
 	}
 	return ""
+}
+
+// held are the versions kept only for a room: the held ones that are neither the
+// current one nor the one a rollback goes to.
+func held(all []string, cur, prev string) []string {
+	var out []string
+	for _, v := range all {
+		if v != cur && v != prev {
+			out = append(out, v)
+		}
+	}
+	return out
 }
