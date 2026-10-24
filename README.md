@@ -68,14 +68,16 @@ per line as JSON:
 
 - **My own agents** (`myAgents`, a member's, kept on their computer): a command
   name or an absolute path, version arguments and how to read the version, an
-  update command and its arguments (the page shows the exact command before the
-  click), and an ACP launch line to give it to rooms. A line with the id of a
+  install line for an agent that is not on the computer (`installArgs`, run with
+  `sh` unless `installCommand` names another command) and an update command (the
+  page shows the exact command before the click), and an ACP launch line to give
+  it to rooms. A line with the id of a
   catalog agent and only `command` and `versionArgs` points that agent at another
   command or path (an agent installed where no PATH reaches).
 - **More agents to recognise** (`orgAgents`, an organization's, for every member):
   recognition only, a bare command name and one version flag (`--version`, `-v`,
-  `-V`, `version`), and words for the member. No update command, no ACP launch
-  line, and no change to a catalog entry: a setting must not make members'
+  `-V`, `version`), and words for the member. No install or update command, no ACP
+  launch line, and no change to a catalog entry: a setting must not make members'
   computers run what an admin typed. An organization that needs entries that run
   commands makes its own build of the manager (`Catalog.With`, package `app`) and
   signs it as its own package.
@@ -89,7 +91,9 @@ Lines look like this (all fields but `id` and `command` are optional):
 ```
 
 `updateCommand` (a bare command name, such as `brew`) runs `updateArgs` instead of
-the agent itself. A line that does not fit is named on the page and left out.
+the agent itself. An install line is typed as the member would type it, for
+example `"installArgs":["-c","curl -fsSL https://example.com/install.sh | bash"]`;
+what it installs must then be on the PATH the app sees, or the page says it is not. A line that does not fit is named on the page and left out.
 
 ## Catalog
 

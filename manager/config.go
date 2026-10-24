@@ -36,7 +36,7 @@ const (
 
 	maxConfigLine = 2048
 	maxConfigArgs = 8
-	maxConfigArg  = 64
+	maxConfigArg  = 512
 	// configuredKind classifies an install found for a configured agent, so
 	// its update (when the member gave one) applies.
 	configuredKind = "configured"
@@ -55,9 +55,13 @@ type ConfiguredAgent struct {
 	VersionParse  string   `json:"versionParse,omitempty"`
 	UpdateCommand string   `json:"updateCommand,omitempty"`
 	UpdateArgs    []string `json:"updateArgs,omitempty"`
-	ACPArgs       []string `json:"acpArgs,omitempty"`
-	InstallHint   string   `json:"installHint,omitempty"`
-	SignIn        string   `json:"signIn,omitempty"`
+	// InstallCommand and InstallArgs install the agent when it is not on the
+	// computer (a member's own; the page shows the command before the click).
+	InstallCommand string   `json:"installCommand,omitempty"`
+	InstallArgs    []string `json:"installArgs,omitempty"`
+	ACPArgs        []string `json:"acpArgs,omitempty"`
+	InstallHint    string   `json:"installHint,omitempty"`
+	SignIn         string   `json:"signIn,omitempty"`
 }
 
 func decodeLine(line string) (ConfiguredAgent, error) {
@@ -101,8 +105,8 @@ func (a *ConfiguredAgent) check(scope string) error {
 	}
 	if !member {
 		switch {
-		case len(a.UpdateArgs) > 0 || a.UpdateCommand != "":
-			return fmt.Errorf("an organization cannot set an update command: only a member sets one for their own computer (an organization ships one in a signed build of the manager)")
+		case len(a.UpdateArgs) > 0 || a.UpdateCommand != "" || len(a.InstallArgs) > 0 || a.InstallCommand != "":
+			return fmt.Errorf("an organization cannot set an install or update command: only a member sets one for their own computer (an organization ships one in a signed build of the manager)")
 		case len(a.ACPArgs) > 0:
 			return fmt.Errorf("an organization cannot set an ACP launch line: only a member sets one for their own computer")
 		case len(a.VersionArgs) > 1 || (len(a.VersionArgs) == 1 && !slices.Contains(orgVersionFlags, a.VersionArgs[0])):
@@ -117,6 +121,15 @@ func (a *ConfiguredAgent) check(scope string) error {
 	}
 	if err := checkArgs("acpArgs", a.ACPArgs); err != nil {
 		return err
+	}
+	if err := checkArgs("installArgs", a.InstallArgs); err != nil {
+		return err
+	}
+	if a.InstallCommand != "" && !binRE.MatchString(a.InstallCommand) {
+		return fmt.Errorf("installCommand must be a bare command name")
+	}
+	if (a.InstallCommand != "") != (len(a.InstallArgs) > 0) && a.InstallCommand != "" {
+		return fmt.Errorf("installCommand needs installArgs")
 	}
 	if a.UpdateCommand != "" && !binRE.MatchString(a.UpdateCommand) {
 		return fmt.Errorf("updateCommand must be a bare command name")
@@ -136,7 +149,7 @@ func (a *ConfiguredAgent) check(scope string) error {
 // overridesOnly reports a line that only says where an existing agent is: the
 // fields that may change one.
 func (a ConfiguredAgent) overridesOnly() bool {
-	return a.Name == "" && a.UpdateCommand == "" && len(a.UpdateArgs) == 0 && len(a.ACPArgs) == 0 && a.InstallHint == "" && a.SignIn == ""
+	return a.Name == "" && a.UpdateCommand == "" && len(a.UpdateArgs) == 0 && a.InstallCommand == "" && len(a.InstallArgs) == 0 && len(a.ACPArgs) == 0 && a.InstallHint == "" && a.SignIn == ""
 }
 
 func (a ConfiguredAgent) detect() Detect {
@@ -162,6 +175,15 @@ func (a ConfiguredAgent) entry(source string) Entry {
 	}
 	if len(a.UpdateArgs) > 0 {
 		e.Update = []Update{{Kind: configuredKind, Command: a.UpdateCommand, Args: slices.Clone(a.UpdateArgs)}}
+	}
+	if len(a.InstallArgs) > 0 {
+		// A command name for the installer, else a shell: the member's own
+		// install line, as they would type it.
+		cmd := a.InstallCommand
+		if cmd == "" {
+			cmd = "sh"
+		}
+		e.InstallRun = &Run{Command: cmd, Args: slices.Clone(a.InstallArgs)}
 	}
 	if len(a.ACPArgs) > 0 && agentNameRE.MatchString(a.ID) {
 		e.Register = &Register{Name: a.ID, Args: slices.Clone(a.ACPArgs)}

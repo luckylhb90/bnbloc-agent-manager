@@ -2,7 +2,7 @@
   "kind": "bnbloc.plugin.package/v1",
   "contract": "bnbloc.plugin.contract/v1",
   "name": "agent-manager",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "bnbloc",
   "description": "See the coding agents on your computer, install and update them, and give them to your rooms. Nothing is installed or changed until you click.",
   "runtime": "sidecar",
@@ -59,14 +59,14 @@
       "label": "More agents to recognise",
       "type": "lines",
       "scope": "org",
-      "help": "One agent per line, as JSON: {\"id\":\"corp\",\"name\":\"Corp CLI\",\"command\":\"corp\",\"versionArgs\":[\"--version\"]}. Recognition only: a command name and one version flag; no update command or ACP launch line. A line that does not fit is named on the page. See the README."
+      "help": "One agent per line, as JSON: {\"id\":\"corp\",\"name\":\"Corp CLI\",\"command\":\"corp\",\"versionArgs\":[\"--version\"]}. Recognition only: a command name and one version flag; no install or update command, no ACP launch line. A line that does not fit is named on the page. See the README."
     },
     {
       "key": "myAgents",
       "label": "My own agents",
       "type": "lines",
       "scope": "member",
-      "help": "One agent per line, as JSON, for this computer: id, name, command (name or path), versionArgs, versionParse, updateArgs (an Update button, shown before it runs), updateCommand, acpArgs (for rooms). See the README."
+      "help": "One agent per line, as JSON, for this computer: id, name, command (name or path), versionArgs, versionParse, installArgs (+installCommand), updateArgs (+updateCommand), acpArgs. Install and update show their command and run on your click. See the README."
     }
   ]
 }

@@ -429,6 +429,9 @@ func (s *Service) managedVersion(id string) (cur, prev string) {
 }
 
 func (s *Service) doInstall(ctx context.Context, op *operation, e *Entry) error {
+	if e.Install == nil && e.InstallRun != nil {
+		return s.runInstaller(ctx, op, e)
+	}
 	if e.Install == nil {
 		if e.InstallHint != "" {
 			return errors.New("the manager does not install " + e.Name + ". " + e.InstallHint)
@@ -452,6 +455,25 @@ func (s *Service) doInstall(ctx context.Context, op *operation, e *Entry) error 
 		a.Registered = e.Register != nil
 		a.Latest, a.CheckErr = v, ""
 	})
+}
+
+// runInstaller runs a member's own install line for an agent not on their
+// computer, then looks again: what it installed must be found.
+func (s *Service) runInstaller(ctx context.Context, op *operation, e *Entry) error {
+	path, err := exec.LookPath(e.InstallRun.Command)
+	if err != nil {
+		return fmt.Errorf("%s is needed to install %s and was not found", e.InstallRun.Command, e.Name)
+	}
+	op.logf("installing %s", e.Name)
+	if err := s.run(ctx, op, path, e.InstallRun.Args...); err != nil {
+		return err
+	}
+	d := s.detect(ctx, e)
+	if d.Command == "" {
+		return fmt.Errorf("the installer finished, but %s is not on the PATH this app sees: add its folder to your PATH (a new terminal is not enough) and restart the app", e.Detect.Command)
+	}
+	op.logf("%s is now at %s", e.Name, d.Path)
+	return nil
 }
 
 func (s *Service) doUpdate(ctx context.Context, op *operation, e *Entry) error {

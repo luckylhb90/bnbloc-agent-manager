@@ -85,7 +85,10 @@ function card(a) {
   const busy = a.op && a.op.running;
   const btns = [];
   const add = (label, action, primary) => btns.push(h("button", { class: primary ? "primary" : "", onclick: () => act(a.id, action) }, label));
-  if (a.can.install) add("Install", "install", true);
+  if (a.can.install) {
+    if (a.installCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id + ":install"; render(); } }, "Install"));
+    else add("Install", "install", true);
+  }
   if (a.can.update) {
     if (a.external && a.updateCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id; render(); } }, a.updateUnknown ? "Run its updater" : "Update"));
     else add("Update", "update", true);
@@ -101,6 +104,11 @@ function card(a) {
     body.push(h("div", { class: "hint" }, a.adapter ? "Rooms run it through the ACP adapter below." : "Kept current here; rooms can’t run it yet (no ACP launch line)."));
   }
   body.push(detail(a));
+  if (confirming === a.id + ":install") {
+    body.push(h("div", { class: "hint" }, "This runs on your computer:",
+      h("code", { class: "cmd" }, a.installCommand),
+      h("button", { class: "primary", onclick: () => act(a.id, "install") }, "Run"), " ", h("button", { onclick: () => { confirming = null; render(); } }, "Cancel")));
+  }
   if (confirming === a.id) {
     body.push(h("div", { class: "hint" }, "This runs on your computer, changing your own install", a.external && a.external.kind === "npm-global" ? "" : " (the manager cannot roll it back)", ":",
       h("code", { class: "cmd" }, a.updateCommand),

@@ -69,6 +69,8 @@ type AgentView struct {
 	// newer version is known: the page offers to run it without claiming one.
 	UpdateUnknown bool   `json:"updateUnknown,omitempty"`
 	Pinned        string `json:"pinned,omitempty"`
+	// InstallCommand is shown before a member's own installer runs.
+	InstallCommand string `json:"installCommand,omitempty"`
 	// UpdateCommand is shown before an update of an install the manager did
 	// not make.
 	UpdateCommand string `json:"updateCommand,omitempty"`
@@ -178,7 +180,10 @@ func (s *Service) agentView(e *Entry) AgentView {
 		}
 	}
 
-	v.Can.Install = e.Install != nil && !managed && v.External == nil && !busy
+	v.Can.Install = (e.Install != nil || e.InstallRun != nil) && !managed && v.External == nil && !busy
+	if e.InstallRun != nil && v.Can.Install {
+		v.InstallCommand = e.InstallRun.Command + " " + strings.Join(e.InstallRun.Args, " ")
+	}
 	if !managed && e.Install == nil && e.InstallHint != "" && v.External == nil {
 		v.Reason = e.InstallHint
 	}

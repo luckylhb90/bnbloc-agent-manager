@@ -28,6 +28,10 @@ type Catalog struct {
 type Entry struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// InstallRun is a member's own installer for an agent not on their
+	// computer: a command and its arguments, run on their click after the page
+	// shows it. Only configuration sets it (a catalog file cannot: json:"-").
+	InstallRun *Run `json:"-"`
 	// Source says who added a configured entry ("" for the catalog's own):
 	// shown on its row. Never read from a catalog file.
 	Source string `json:"-"`
@@ -54,6 +58,12 @@ type Entry struct {
 	Register *Register `json:"register,omitempty"`
 	// SignIn is shown after an install: each agent keeps its own sign-in.
 	SignIn string `json:"signIn,omitempty"`
+}
+
+// Run is a command with its arguments.
+type Run struct {
+	Command string
+	Args    []string
 }
 
 // Install is the npm method: a package into <store>/<id>/<version>/.

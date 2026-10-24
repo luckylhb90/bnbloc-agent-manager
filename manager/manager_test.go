@@ -881,7 +881,7 @@ func TestAnOrganizationAddsAgentsToRecogniseAndNeverToRun(t *testing.T) {
 		t.Error("an organization cannot change a catalog entry")
 	}
 	notes := strings.Join(svc.Snapshot().Notes, "\n")
-	for _, want := range []string{"cannot set an update command", "ACP launch line", "version argument", "bare command name", `"fake" is already an agent`, "known fields", "not a JSON object"} {
+	for _, want := range []string{"cannot set an install or update command", "ACP launch line", "version argument", "bare command name", `"fake" is already an agent`, "known fields", "not a JSON object"} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("a refused line is named (%q): %s", want, notes)
 		}
@@ -934,5 +934,58 @@ func TestOnlyANpmGlobalPrefixCountsAsAGlobalInstall(t *testing.T) {
 		if got, _ := classify(e, path, store); got != want {
 			t.Errorf("%s: %s, want %s", path, got, want)
 		}
+	}
+}
+
+func TestAMemberInstallsWithTheirOwnInstallLineAndOnlyOnAClick(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh")
+	}
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	script := `printf '#!/bin/sh\necho "instagent 1.2.3"\n' > ` + filepath.Join(bin, "instagent") + ` && chmod +x ` + filepath.Join(bin, "instagent")
+	line, _ := json.Marshal(map[string]any{"id": "inst", "name": "Inst", "command": "instagent", "installArgs": []string{"-c", script}})
+	svc := newService(t, testCatalog, nil)
+	writeSettings(t, svc, map[string]any{"myAgents": []string{string(line)}})
+	svc.RefreshDetected(context.Background())
+	v := view(svc, "inst")
+	if v.Status != "absent" || !v.Can.Install || !strings.HasPrefix(v.InstallCommand, "sh -c ") {
+		t.Fatalf("absent, with the command shown before the click: %+v", v)
+	}
+	if err := do(t, svc, "inst", ActInstall); err != nil {
+		t.Fatal(err)
+	}
+	if v = view(svc, "inst"); v.Status != "installed" || v.External == nil || v.External.Version != "1.2.3" || v.Can.Install {
+		t.Fatalf("what the installer put on the PATH is found: %+v", v)
+	}
+}
+
+func TestAnInstallerThatLeavesTheAgentOffThePathSaysSo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh")
+	}
+	line, _ := json.Marshal(map[string]any{"id": "ghost", "command": "ghostagent-not-installed", "installArgs": []string{"-c", "true"}})
+	svc := newService(t, testCatalog, nil)
+	writeSettings(t, svc, map[string]any{"myAgents": []string{string(line)}})
+	svc.RefreshDetected(context.Background())
+	if err := do(t, svc, "ghost", ActInstall); err == nil || !strings.Contains(err.Error(), "not on the PATH") {
+		t.Errorf("an installer whose result is not found: %v", err)
+	}
+	if view(svc, "ghost").Status != "absent" {
+		t.Error("and it stays absent")
+	}
+}
+
+func TestAnOrganizationCannotSetAnInstallLine(t *testing.T) {
+	svc := newService(t, testCatalog, nil)
+	writeSettings(t, svc, map[string]any{"orgAgents": []string{
+		`{"id":"corp","command":"corp","installArgs":["-c","curl x | sh"]}`,
+		`{"id":"corp2","command":"corp","installCommand":"sh","installArgs":["-c","x"]}`,
+	}})
+	if view(svc, "corp").ID != "" || view(svc, "corp2").ID != "" {
+		t.Error("an install line from an organization was accepted")
+	}
+	if !strings.Contains(strings.Join(svc.Snapshot().Notes, "\n"), "cannot set an install or update command") {
+		t.Errorf("and it is said: %v", svc.Snapshot().Notes)
 	}
 }
