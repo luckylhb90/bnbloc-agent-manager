@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"slices"
 	"sync"
 	"time"
@@ -502,9 +503,17 @@ func (s *Service) updateExternal(ctx context.Context, op *operation, e *Entry, t
 		if !ok {
 			return fmt.Errorf("your organization pinned %s to %s, and this install cannot be set to a chosen version", e.Name, pin)
 		}
-		op.logf("updating %s with its own updater", e.Name)
+		program := d.Command
+		if u.Command != "" {
+			path, err := exec.LookPath(u.Command)
+			if err != nil {
+				return fmt.Errorf("%s is needed to update %s and was not found", u.Command, e.Name)
+			}
+			program = path
+		}
+		op.logf("updating %s", e.Name)
 		before := d.Version
-		if err := s.run(ctx, op, d.Command, args...); err != nil {
+		if err := s.run(ctx, op, program, args...); err != nil {
 			return err
 		}
 		after := s.detect(ctx, e).Version

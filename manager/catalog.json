@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-24.2",
+  "version": "2026-10-24.3",
   "agents": [
     {
       "id": "claude",
@@ -208,6 +208,40 @@
         ]
       },
       "signIn": "Run `pi`, then `/login` inside it."
+    },
+    {
+      "id": "omp",
+      "name": "omp",
+      "installHint": "omp installs with Homebrew: brew install can1357/tap/omp (omp.sh). Then reopen this page.",
+      "detect": {
+        "command": "omp",
+        "args": [
+          "--version"
+        ]
+      },
+      "found": [
+        {
+          "kind": "homebrew",
+          "contains": "/cellar/omp/"
+        }
+      ],
+      "update": [
+        {
+          "kind": "homebrew",
+          "command": "brew",
+          "args": [
+            "upgrade",
+            "can1357/tap/omp"
+          ]
+        }
+      ],
+      "register": {
+        "name": "omp",
+        "args": [
+          "acp"
+        ]
+      },
+      "signIn": "Run `omp login` and sign in."
     },
     {
       "id": "hermes",

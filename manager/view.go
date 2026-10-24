@@ -215,7 +215,11 @@ func (s *Service) externalUpdate(e *Entry, v *AgentView, pin string) {
 			v.Reason = "Your organization pinned " + e.Name + " to " + pin + ", and this install cannot be set to a chosen version."
 			return
 		}
-		v.UpdateCommand = d.Command + " " + strings.Join(args, " ")
+		program := d.Command
+		if u.Command != "" {
+			program = u.Command
+		}
+		v.UpdateCommand = program + " " + strings.Join(args, " ")
 		if v.Target == "" {
 			v.UpdateUnknown = true
 			v.Can.Update = true

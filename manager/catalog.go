@@ -101,12 +101,16 @@ type Found struct {
 	Owner string `json:"owner,omitempty"`
 }
 
-// Update is the agent's own updater for an install found as Kind. Args run
-// the command Detect names; PinArgs, with {version}, install a chosen version.
+// Update is the updater for an install found as Kind. Args run the command
+// Detect names (or Command's, a package manager); PinArgs, with {version}, install a chosen version.
 // No PinArgs: the agent cannot install a chosen version, so an organization's
 // pin disables its update instead of being ignored.
 type Update struct {
-	Kind    string   `json:"kind"`
+	Kind string `json:"kind"`
+	// Command is the bare name of the program that runs Args when it is not
+	// the agent's own (a package manager: `brew upgrade <formula>`); empty
+	// runs the agent's command.
+	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args"`
 	PinArgs []string `json:"pinArgs,omitempty"`
 }
@@ -228,6 +232,9 @@ func (e *Entry) validate() error {
 	for _, u := range e.Update {
 		if len(u.Args) == 0 || !slices.ContainsFunc(e.Found, func(f Found) bool { return f.Kind == u.Kind }) {
 			return fmt.Errorf("update for %q needs args and a found rule of that kind", u.Kind)
+		}
+		if u.Command != "" && !binRE.MatchString(u.Command) {
+			return fmt.Errorf("update.command %q must be a bare command name", u.Command)
 		}
 		if len(u.PinArgs) > 0 && !slices.Contains(u.PinArgs, "{version}") {
 			return fmt.Errorf("update.pinArgs for %q must carry {version}", u.Kind)

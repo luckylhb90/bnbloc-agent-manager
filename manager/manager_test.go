@@ -533,6 +533,43 @@ func TestAnInstallTheMemberMadeIsUpdatedOnlyByItsOwnMethodAndOnlyOnAClick(t *tes
 	}
 }
 
+func TestAnUpdateMayRunAPackageManagerInsteadOfTheAgent(t *testing.T) {
+	dir := foundAgent(t, "viaagent", "viabin", "1.0.0")
+	// The package manager: a program of its own that bumps the agent's version.
+	helper := filepath.Join(t.TempDir(), "viahelper")
+	script := "#!/bin/sh\necho \"$@\" > \"" + filepath.Join(dir, "ran") + "\"\necho 2.0.0 > \"" + filepath.Join(dir, "version") + "\"\n"
+	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(helper)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	svc := newService(t, `{"version":"t","agents":[{"id":"via","name":"Via","detect":{"command":"viaagent","args":["--version"]},
+	  "found":[{"kind":"brewed","contains":"/viabin/"}],
+	  "update":[{"kind":"brewed","command":"viahelper","args":["upgrade","viaagent"]}]}]}`, nil)
+	svc.RefreshDetected(context.Background())
+	v := view(svc, "via")
+	if !v.Can.Update || !strings.HasSuffix(v.UpdateCommand, "") || !strings.HasPrefix(v.UpdateCommand, "viahelper upgrade viaagent") {
+		t.Fatalf("the command shown is the helper's, not the agent's: %+v", v)
+	}
+	if err := do(t, svc, "via", ActUpdate); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "ran")); strings.TrimSpace(string(got)) != "upgrade viaagent" {
+		t.Errorf("the helper ran with its arguments: %q", got)
+	}
+	if v = view(svc, "via"); v.External.Version != "2.0.0" {
+		t.Errorf("the new version is read back: %+v", v.External)
+	}
+	// A helper that is not on the computer is said, not guessed.
+	t.Setenv("PATH", filepath.Join(dir)+string(os.PathListSeparator)+"/usr/bin:/bin")
+	svc.RefreshDetected(context.Background())
+	if err := do(t, svc, "via", ActUpdate); err == nil || !strings.Contains(err.Error(), "viahelper is needed") {
+		t.Errorf("a missing helper: %v", err)
+	}
+	if _, err := ParseCatalog([]byte(`{"version":"x","agents":[{"id":"a","name":"A","detect":{"command":"a"},"found":[{"kind":"k","contains":"/x/"}],"update":[{"kind":"k","command":"/bin/sh","args":["-c","x"]}]}]}`)); err == nil {
+		t.Error("an update command that is a path was accepted")
+	}
+}
+
 func TestAPinThatAnInstallCannotHonorDisablesTheUpdate(t *testing.T) {
 	foundAgent(t, "extagent", "extbin", "1.0.0")
 	foundAgent(t, "nopinagent", "nopinbin", "1.0.0")
