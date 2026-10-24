@@ -25,8 +25,11 @@ import (
 //     what an admin typed (a build of the manager, signed as a package, is how an
 //     organization ships entries that run commands: Catalog.With).
 //
-// One agent per line, as a JSON object. A line that does not fit is named on
-// the page and skipped, never dropped silently.
+// Each agent is a JSON object. The setting's lines are read as one text and cut
+// into objects by their braces, so an object may sit on one line or be written
+// over several, and two may share a line (splitObjects). An object that does not
+// fit, and text outside any object, is named on the page and skipped, never
+// dropped silently.
 const (
 	SettingOrgAgents = "orgAgents"
 	SettingMyAgents  = "myAgents"
@@ -206,11 +209,11 @@ func (c *Catalog) WithConfigured(orgLines, memberLines []string) (*Catalog, []st
 		}
 	}
 	apply := func(lines []string, scope, label string) {
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
+		objects, stray := splitObjects(strings.Join(lines, "\n"))
+		for _, n := range stray {
+			notes = append(notes, label+": "+n)
+		}
+		for _, line := range objects {
 			a, err := decodeLine(line)
 			if err == nil {
 				err = a.check(scope)
@@ -248,6 +251,46 @@ func (c *Catalog) WithConfigured(orgLines, memberLines []string) (*Catalog, []st
 	apply(orgLines, SourceOrg, SettingOrgAgents)
 	apply(memberLines, SourceMember, SettingMyAgents)
 	return out, notes
+}
+
+// splitObjects cuts text into its top-level {…} objects (braces inside strings
+// do not count) and says what it could not use: text between objects, and an
+// object that is never closed.
+func splitObjects(text string) (objects, notes []string) {
+	depth, start := 0, -1
+	inString, escaped := false, false
+	stray := false
+	for i, r := range text {
+		if depth > 0 {
+			switch {
+			case inString && escaped:
+				escaped = false
+			case inString && r == '\\':
+				escaped = true
+			case r == '"':
+				inString = !inString
+			case !inString && r == '{':
+				depth++
+			case !inString && r == '}':
+				depth--
+				if depth == 0 {
+					objects = append(objects, text[start:i+1])
+				}
+			}
+			continue
+		}
+		switch {
+		case r == '{':
+			depth, start, inString, escaped = 1, i, false, false
+		case r != ' ' && r != '\t' && r != '\n' && r != '\r' && !stray:
+			stray = true
+			notes = append(notes, fmt.Sprintf("text outside any {…} was ignored (near %q)", shorten(strings.TrimSpace(text[i:]))))
+		}
+	}
+	if depth > 0 {
+		notes = append(notes, fmt.Sprintf("an object is never closed: %s", shorten(strings.TrimSpace(text[start:]))))
+	}
+	return objects, notes
 }
 
 func shorten(s string) string {

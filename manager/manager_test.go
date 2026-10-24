@@ -989,3 +989,38 @@ func TestAnOrganizationCannotSetAnInstallLine(t *testing.T) {
 		t.Errorf("and it is said: %v", svc.Snapshot().Notes)
 	}
 }
+
+func TestAnAgentMayBeWrittenOverSeveralLinesOrSeveralToALine(t *testing.T) {
+	cat, _ := ParseCatalog([]byte(testCatalog))
+	// What a member pasted: one object cut at its line breaks into three lines.
+	pasted := []string{
+		`{"id":"corpcli","name":"corpcli","command":"corpcli","versionArgs":["--version"],`,
+		` "installArgs":["-c","curl -fsSL https://example.com/install.sh | bash"],`,
+		` "updateArgs":["update"],"signIn":"Run ` + "`corpcli login`" + `."}`,
+	}
+	got, notes := cat.WithConfigured(nil, pasted)
+	e, ok := got.Entry("corpcli")
+	if !ok || len(notes) != 0 || e.InstallRun == nil || e.InstallRun.Args[1] != "curl -fsSL https://example.com/install.sh | bash" || len(e.Update) != 1 {
+		t.Fatalf("an object over three lines is one agent: %v %+v", notes, e)
+	}
+	// Two on a line, braces and quotes inside strings, an escaped quote.
+	got, notes = cat.WithConfigured(nil, []string{`{"id":"a1","command":"x","signIn":"use { and } and \"quotes\""} {"id":"a2","command":"y"}`})
+	if _, ok := got.Entry("a1"); !ok || len(notes) != 0 {
+		t.Errorf("braces inside strings do not count: %v", notes)
+	}
+	if _, ok := got.Entry("a2"); !ok {
+		t.Error("two objects on a line are two agents")
+	}
+	// What cannot be used is said, once, and the rest still works.
+	got, notes = cat.WithConfigured(nil, []string{"corpcli:", `{"id":"b1","command":"x"}`, `{"id":"b2","command":"y"`})
+	if _, ok := got.Entry("b1"); !ok {
+		t.Error("a good object beside bad text is kept")
+	}
+	joined := strings.Join(notes, "\n")
+	if !strings.Contains(joined, "outside any {") || !strings.Contains(joined, "never closed") {
+		t.Errorf("stray text and an unclosed object are named: %v", notes)
+	}
+	if _, ok := got.Entry("b2"); ok {
+		t.Error("an unclosed object is not guessed at")
+	}
+}

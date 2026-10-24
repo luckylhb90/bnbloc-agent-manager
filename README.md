@@ -63,8 +63,9 @@ the ACP core's home and none.
 
 ## Configuring more agents
 
-Two settings add agents without a new build (Components → Settings), one agent
-per line as JSON:
+Two settings add agents without a new build (Components → Settings). Each agent
+is a JSON object, on one line or written over several (objects are cut out by
+their braces, so a pasted, pretty-printed object works):
 
 - **My own agents** (`myAgents`, a member's, kept on their computer): a command
   name or an absolute path, version arguments and how to read the version, an
@@ -82,7 +83,7 @@ per line as JSON:
   commands makes its own build of the manager (`Catalog.With`, package `app`) and
   signs it as its own package.
 
-Lines look like this (all fields but `id` and `command` are optional):
+An agent looks like this (all fields but `id` and `command` are optional):
 
 ```json
 {"id":"corp","name":"Corp CLI","command":"corp","versionArgs":["--version"],
@@ -93,7 +94,8 @@ Lines look like this (all fields but `id` and `command` are optional):
 `updateCommand` (a bare command name, such as `brew`) runs `updateArgs` instead of
 the agent itself. An install line is typed as the member would type it, for
 example `"installArgs":["-c","curl -fsSL https://example.com/install.sh | bash"]`;
-what it installs must then be on the PATH the app sees, or the page says it is not. A line that does not fit is named on the page and left out.
+what it installs must then be on the PATH the app sees, or the page says it is not. An object that does not fit, and text outside any object, is named on the page and
+left out.
 
 ## Catalog
 
