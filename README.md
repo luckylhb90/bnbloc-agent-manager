@@ -80,7 +80,16 @@ per line as JSON:
   commands makes its own build of the manager (`Catalog.With`, package `app`) and
   signs it as its own package.
 
-A line that does not fit is named on the page and left out.
+Lines look like this (all fields but `id` and `command` are optional):
+
+```json
+{"id":"corp","name":"Corp CLI","command":"corp","versionArgs":["--version"],
+ "versionParse":"v(\\d+\\.\\d+\\.\\d+)","updateArgs":["update"],"acpArgs":["acp"],
+ "installHint":"Install it from the portal.","signIn":"Run `corp login`."}
+```
+
+`updateCommand` (a bare command name, such as `brew`) runs `updateArgs` instead of
+the agent itself. A line that does not fit is named on the page and left out.
 
 ## Catalog
 

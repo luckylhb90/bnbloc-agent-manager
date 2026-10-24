@@ -59,14 +59,14 @@
       "label": "More agents to recognise",
       "type": "lines",
       "scope": "org",
-      "help": "One agent per line, as JSON, so members see where it stands: {\"id\":\"corp\",\"name\":\"Corp CLI\",\"command\":\"corp\",\"versionArgs\":[\"--version\"],\"installHint\":\"…\",\"signIn\":\"…\"}. Only a command name and one version flag (--version, -v, -V or version): an organization cannot set an update command or an ACP launch line here. A line that does not fit is named on the page."
+      "help": "One agent per line, as JSON: {\"id\":\"corp\",\"name\":\"Corp CLI\",\"command\":\"corp\",\"versionArgs\":[\"--version\"]}. Recognition only: a command name and one version flag; no update command or ACP launch line. A line that does not fit is named on the page. See the README."
     },
     {
       "key": "myAgents",
       "label": "My own agents",
       "type": "lines",
       "scope": "member",
-      "help": "One agent per line, as JSON, for this computer only: {\"id\":\"corp\",\"name\":\"Corp CLI\",\"command\":\"/path/or/name\",\"versionArgs\":[\"--version\"],\"versionParse\":\"v(\\\\d+\\\\.\\\\d+\\\\.\\\\d+)\",\"updateArgs\":[\"update\"],\"updateCommand\":\"brew\",\"acpArgs\":[\"acp\"]}. updateArgs and updateCommand (a command name) give it an Update button that shows the command first; acpArgs lets it be given to rooms. A line with the id of a catalog agent and only command and versionArgs points that agent at another command or path."
+      "help": "One agent per line, as JSON, for this computer: id, name, command (name or path), versionArgs, versionParse, updateArgs (an Update button, shown before it runs), updateCommand, acpArgs (for rooms). See the README."
     }
   ]
 }
