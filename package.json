@@ -2,7 +2,7 @@
   "kind": "bnbloc.plugin.package/v1",
   "contract": "bnbloc.plugin.contract/v1",
   "name": "agent-manager",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "bnbloc",
   "description": "See the coding agents on your computer, install and update them, and give them to your rooms. Nothing is installed or changed until you click.",
   "runtime": "sidecar",
@@ -59,14 +59,14 @@
       "label": "More agents to recognise",
       "type": "lines",
       "scope": "org",
-      "help": "Agents to recognise, each a JSON object (one line or several): {\"id\":\"corp\",\"name\":\"Corp CLI\",\"command\":\"corp\",\"versionArgs\":[\"--version\"]}. A command name and one version flag only; no install or update command, no ACP launch line. See the README."
+      "help": "One JSON object per agent to recognise, e.g. {\"id\":\"corp\",\"name\":\"Corp CLI\",\"command\":\"corp\",\"versionArgs\":[\"--version\"]}. Only a command name and one version flag: no install or update command, no ACP launch line."
     },
     {
       "key": "myAgents",
       "label": "My own agents",
       "type": "lines",
       "scope": "member",
-      "help": "Agents for this computer, each a JSON object (one line or several): id, name, command (name or path), versionArgs, versionParse, installArgs (+installCommand), updateArgs (+updateCommand), acpArgs. Install and update show their command and run on your click. See the README."
+      "help": "One JSON object per agent, e.g. {\"id\":\"corp\",\"name\":\"Corp\",\"command\":\"corp\",\"installArgs\":[\"-c\",\"curl -fsSL URL | bash\"],\"updateArgs\":[\"update\"]}. installArgs run with sh (or installCommand); updateArgs run the command itself. Also versionArgs, versionParse, acpArgs."
     }
   ]
 }

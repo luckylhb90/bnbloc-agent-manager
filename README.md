@@ -97,6 +97,11 @@ example `"installArgs":["-c","curl -fsSL https://example.com/install.sh | bash"]
 what it installs must then be on the PATH the app sees, or the page says it is not. An object that does not fit, and text outside any object, is named on the page and
 left out.
 
+You do not have to write one by hand: the settings form's **Fill from a note**
+turns a pasted install note (a README section, an email) into the object, and
+you check it before saving. It reads the settings' help text, which therefore
+carries a working example (a test holds each example to the rules).
+
 ## Catalog
 
 `manager/catalog.json`: typed entries (an npm package and its command, how a

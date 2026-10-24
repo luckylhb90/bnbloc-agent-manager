@@ -1113,3 +1113,63 @@ func TestARowSaysWhenTheMembersOwnFileDefinesItsName(t *testing.T) {
 		t.Error("a file that does not parse names nothing (the core keeps its previous config, which this cannot know)")
 	}
 }
+
+// What fill-settings answered, run against the real assist with the settings'
+// own help text and a pasted install note (2026-10-24): it must be a line the
+// manager takes as an agent with its install and update.
+func TestWhatTheFillAssistWritesIsAnAgent(t *testing.T) {
+	line := `{"id":"corpcli","name":"Corp CLI","command":"corpcli","installArgs":["-c","curl -fsSL https://example.com/install.sh | bash"],"updateArgs":["update"],"versionArgs":["--version"]}`
+	if len(line) > 512 {
+		t.Fatal("longer than the one-line bound of a lines setting")
+	}
+	cat, _ := ParseCatalog([]byte(testCatalog))
+	got, notes := cat.WithConfigured(nil, []string{line})
+	e, ok := got.Entry("corpcli")
+	if !ok || len(notes) != 0 || e.InstallRun == nil || e.InstallRun.Command != "sh" || e.InstallRun.Args[0] != "-c" || len(e.Update) != 1 {
+		t.Fatalf("%v %+v", notes, e)
+	}
+}
+
+// The help of each configurable setting is what an AI sees when it fills the
+// setting from a note, so its example is held to the rules: it must be an
+// agent the manager accepts for that scope, and the help stays within the
+// platform's 300 characters.
+func TestTheSettingsHelpCarriesAWorkingExample(t *testing.T) {
+	raw, err := os.ReadFile("../package.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Settings []struct{ Key, Help string } `json:"settings"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		t.Fatal(err)
+	}
+	scope := map[string]string{SettingMyAgents: SourceMember, SettingOrgAgents: SourceOrg}
+	seen := 0
+	for _, s := range pkg.Settings {
+		if len(s.Help) > 300 {
+			t.Errorf("%s: help is %d characters, the platform allows 300", s.Key, len(s.Help))
+		}
+		sc, ok := scope[s.Key]
+		if !ok {
+			continue
+		}
+		seen++
+		objs, _ := splitObjects(s.Help)
+		if len(objs) == 0 {
+			t.Errorf("%s: the help gives no example object", s.Key)
+			continue
+		}
+		a, err := decodeLine(objs[0])
+		if err == nil {
+			err = a.check(sc)
+		}
+		if err != nil {
+			t.Errorf("%s: its own example is not accepted: %v", s.Key, err)
+		}
+	}
+	if seen != 2 {
+		t.Errorf("both configurable settings are declared, found %d", seen)
+	}
+}
