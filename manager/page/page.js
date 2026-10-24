@@ -97,7 +97,7 @@ function card(a) {
   if (a.can.register || a.can.unregister) {
     body.push(h("label", { class: "toggle" }, h("input", { type: "checkbox", checked: a.registered, onchange: () => act(a.id, a.registered ? "unregister" : "register") }), "Use in rooms"));
   } else if (!a.hasACP && a.status === "installed") {
-    body.push(h("div", { class: "hint" }, "Kept current here; rooms can’t run it yet (no ACP launch line)."));
+    body.push(h("div", { class: "hint" }, a.adapter ? "Rooms run it through the ACP adapter below." : "Kept current here; rooms can’t run it yet (no ACP launch line)."));
   }
   body.push(detail(a));
   if (confirming === a.id) {
@@ -111,7 +111,7 @@ function card(a) {
   if (actionError[a.id]) body.push(h("div", { class: "err" }, actionError[a.id]));
   if (a.op && a.op.error && !busy) body.push(h("div", { class: "err" }, a.op.error));
   if (a.op && a.op.log && a.op.log.length) body.push(h("details", { open: busy || !!a.op.error }, h("summary", {}, busy ? "Progress" : "Last operation"), h("pre", {}, a.op.log.join("\n"))));
-  return h("div", { class: "card", id: "a-" + a.id }, body);
+  return h("div", { class: a.for ? "card sub" : "card", id: "a-" + a.id }, body);
 }
 
 function render() {
@@ -119,7 +119,9 @@ function render() {
   const openLogs = new Set([...document.querySelectorAll("details[open]")].map((d) => d.closest(".card") && d.closest(".card").id));
   $("notes").replaceChildren(...(snap.notes || []).map((n) => h("div", { class: "notes" }, n)));
   const shown = snap.agents.filter((a) => a.status !== "unsupported");
-  $("list").replaceChildren(...shown.map(card));
+  // An adapter row follows the agent it serves.
+  const ordered = shown.filter((a) => !a.for).flatMap((a) => [a, ...shown.filter((c) => c.for === a.id)]);
+  $("list").replaceChildren(...ordered.map(card));
   for (const d of document.querySelectorAll(".card")) if (openLogs.has(d.id)) { const x = d.querySelector("details"); if (x) x.open = true; }
   const s = snap.settings;
   $("foot").textContent = "Agent manager " + snap.component + " · catalog " + snap.catalogVersion +

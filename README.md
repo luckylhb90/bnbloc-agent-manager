@@ -35,6 +35,11 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
   click, after showing the exact command. It is never removed.
 - **Use in rooms** gives an agent to the ACP core (a file in its `agents.d`
   directory). Your own `agents.json` always wins on a name.
+- **An agent and its ACP adapter are two rows.** The agent is the command you
+  installed (Claude Code's `claude`, `codex`): found, versioned and updated by
+  its own method. Rooms run another program, the agent's ACP adapter, which is its
+  own row under it (installed and registered by the manager); an agent that
+  speaks ACP itself (Gemini CLI, OpenCode, Hermes) has no adapter row.
 - Hermes and pi are in the first batch; Hermes installs with its own installer
   (the page shows how) and is managed after that.
 

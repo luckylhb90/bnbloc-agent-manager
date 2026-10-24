@@ -46,6 +46,10 @@ type Can struct {
 type AgentView struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// For is the agent this row is the ACP adapter of (shown under it);
+	// Adapter is, on an agent, the id of its adapter row.
+	For     string `json:"for,omitempty"`
+	Adapter string `json:"adapter,omitempty"`
 	// Status: "unsupported" (not for this OS), "blocked" (the organization
 	// does not offer it), "absent", "installed".
 	Status   string    `json:"status"`
@@ -110,7 +114,7 @@ func (s *Service) agentView(e *Entry) AgentView {
 	s.mu.Unlock()
 
 	v := AgentView{
-		ID: e.ID, Name: e.Name, Pinned: pin, HasACP: e.Register != nil,
+		ID: e.ID, Name: e.Name, For: e.For, Adapter: s.adapterOf(e.ID), Pinned: pin, HasACP: e.Register != nil,
 		InstallHint: e.InstallHint, SignIn: e.SignIn,
 		Latest: a.Latest, CheckedAt: a.CheckedAt, CheckError: a.CheckErr,
 		Registered: a.Registered && e.Register != nil,
@@ -250,4 +254,14 @@ func (s *Service) size(id string, kept ...string) int64 {
 type sizeEntry struct {
 	key string
 	n   int64
+}
+
+// adapterOf is the id of the entry that is the adapter of agent id ("" none).
+func (s *Service) adapterOf(id string) string {
+	for i := range s.Catalog.Agents {
+		if s.Catalog.Agents[i].For == id {
+			return s.Catalog.Agents[i].ID
+		}
+	}
+	return ""
 }

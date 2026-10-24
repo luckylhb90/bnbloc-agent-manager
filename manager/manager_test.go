@@ -180,6 +180,36 @@ func TestEmbeddedCatalogIsValid(t *testing.T) {
 	}
 }
 
+func TestAnAdapterIsAnEntryOfItsOwnUnderAnAgent(t *testing.T) {
+	c, err := DefaultCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What the member knows (the command they installed) and what rooms run
+	// (its ACP adapter) are different programs, so two entries.
+	for _, id := range []string{"claude", "codex"} {
+		agent, _ := c.Entry(id)
+		adapter, ok := c.Entry(id + "-acp")
+		if agent.Register != nil || !ok || adapter.For != id || adapter.Register == nil || adapter.Register.Name != id {
+			t.Errorf("%s: agent %+v adapter %+v", id, agent.Register, adapter)
+		}
+	}
+	base := `{"id":"a","name":"A","detect":{"command":"a"}}`
+	for name, extra := range map[string]string{
+		"for an unknown agent":     `{"id":"b","name":"B","for":"zzz","detect":{"command":"b"}}`,
+		"for itself":               `{"id":"b","name":"B","for":"b","detect":{"command":"b"}}`,
+		"an adapter of an adapter": `{"id":"b","name":"B","for":"a","detect":{"command":"b"}},{"id":"c","name":"C","for":"b","detect":{"command":"c"}}`,
+	} {
+		if _, err := ParseCatalog([]byte(`{"version":"x","agents":[` + base + `,` + extra + `]}`)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	svc := newService(t, `{"version":"x","agents":[`+base+`,{"id":"b","name":"B","for":"a","detect":{"command":"b"}}]}`, nil)
+	if a, b := view(svc, "a"), view(svc, "b"); a.Adapter != "b" || b.For != "a" {
+		t.Errorf("the page learns who serves whom: %+v %+v", a, b)
+	}
+}
+
 func TestCatalogRefusesWhatItCannotVerify(t *testing.T) {
 	cases := map[string]string{
 		"a shell-string method":    `{"id":"a","name":"A","install":{"method":"script","package":"x","bin":"x"},"detect":{"command":"a"}}`,

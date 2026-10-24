@@ -28,6 +28,10 @@ type Catalog struct {
 type Entry struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// For names the agent this entry serves: the ACP adapter an agent needs
+	// for rooms is its own entry (its own install, version and registration),
+	// shown under the agent the member knows.
+	For string `json:"for,omitempty"`
 	// Platforms are the GOOS values the agent runs on (empty: all).
 	Platforms []string `json:"platforms,omitempty"`
 	// Install is how the manager installs it into its own store. Empty: the
@@ -152,6 +156,15 @@ func ParseCatalog(raw []byte) (*Catalog, error) {
 				return nil, fmt.Errorf("catalog: duplicate registered name %q", e.Register.Name)
 			}
 			names[e.Register.Name] = true
+		}
+	}
+	for _, e := range c.Agents {
+		if e.For == "" {
+			continue
+		}
+		parent, ok := c.Entry(e.For)
+		if !ok || e.For == e.ID || parent.For != "" {
+			return nil, fmt.Errorf("catalog: agent %q is for %q, which is not an agent of its own", e.ID, e.For)
 		}
 	}
 	return &c, nil
