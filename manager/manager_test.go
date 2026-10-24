@@ -1091,3 +1091,25 @@ func TestAnAdapterIsToldWhereItsAgentIs(t *testing.T) {
 		t.Error("commandEnv on an entry that serves no agent was accepted")
 	}
 }
+
+func TestARowSaysWhenTheMembersOwnFileDefinesItsName(t *testing.T) {
+	foundAgent(t, "extagent", "extbin", "1.0.0")
+	svc := newService(t, testCatalog, nil)
+	svc.RefreshDetected(context.Background())
+	if view(svc, "ext").Shadowed {
+		t.Fatal("no agents.json, nothing shadows")
+	}
+	_ = os.MkdirAll(svc.ACPHome, 0o755)
+	own := filepath.Join(svc.ACPHome, OwnConfigFile)
+	_ = os.WriteFile(own, []byte(`{"agents":[{"name":"ext","command":"mine"},{"name":"other","command":"x"}]}`), 0o600)
+	if v := view(svc, "ext"); !v.Shadowed {
+		t.Errorf("the member's own entry wins on this name, and the row says so: %+v", v)
+	}
+	if view(svc, "fake").Shadowed {
+		t.Error("another agent's name is not shadowed")
+	}
+	_ = os.WriteFile(own, []byte("{not json"), 0o600)
+	if view(svc, "ext").Shadowed {
+		t.Error("a file that does not parse names nothing (the core keeps its previous config, which this cannot know)")
+	}
+}

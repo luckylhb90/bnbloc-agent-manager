@@ -100,7 +100,11 @@ function card(a) {
   const body = [h("div", { class: "row" }, h("div", { class: "name" }, a.name), chip(a), btns)];
   if (a.can.register || a.can.unregister) {
     body.push(h("label", { class: "toggle" }, h("input", { type: "checkbox", checked: a.registered, onchange: () => act(a.id, a.registered ? "unregister" : "register") }), "Use in rooms"));
-  } else if (!a.hasACP && a.status === "installed") {
+  }
+  if (a.shadowed && (a.can.register || a.can.unregister || a.registered)) {
+    body.push(h("div", { class: "hint" }, "Your own agents.json already defines this agent for rooms, so rooms run that one, not this. Remove its entry there to use this."));
+  }
+  if (!(a.can.register || a.can.unregister) && !a.hasACP && a.status === "installed") {
     body.push(h("div", { class: "hint" }, a.adapter ? "Rooms run it through the ACP adapter below." : "Kept current here; rooms can’t run it yet (no ACP launch line)."));
   }
   body.push(detail(a));

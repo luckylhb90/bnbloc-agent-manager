@@ -111,3 +111,33 @@ func (s *Service) writeRegistration() error {
 	}
 	return writeFileAtomic(path, raw, 0o600)
 }
+
+// OwnConfigFile is the member's own agent list in the ACP core's home; it wins
+// over this component's drop-in on a name.
+const OwnConfigFile = "agents.json"
+
+// ownNames are the agent names the member's own file defines. Only the names
+// are read (the schema is the ACP core's); a file that is missing or does not
+// parse names none.
+func (s *Service) ownNames() map[string]bool {
+	out := map[string]bool{}
+	if s.ACPHome == "" {
+		return out
+	}
+	raw, err := os.ReadFile(filepath.Join(s.ACPHome, OwnConfigFile))
+	if err != nil {
+		return out
+	}
+	var doc struct {
+		Agents []struct {
+			Name string `json:"name"`
+		} `json:"agents"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return out
+	}
+	for _, a := range doc.Agents {
+		out[a.Name] = true
+	}
+	return out
+}

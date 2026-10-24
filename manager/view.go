@@ -75,10 +75,13 @@ type AgentView struct {
 	// not make.
 	UpdateCommand string `json:"updateCommand,omitempty"`
 	// Reason says why an action is unavailable, in words for the member.
-	Reason      string  `json:"reason,omitempty"`
-	Can         Can     `json:"can"`
-	Registered  bool    `json:"registered"`
-	HasACP      bool    `json:"hasACP"`
+	Reason     string `json:"reason,omitempty"`
+	Can        Can    `json:"can"`
+	Registered bool   `json:"registered"`
+	HasACP     bool   `json:"hasACP"`
+	// Shadowed: the member's own agents.json defines the name this row is given
+	// to rooms under, so their entry is the one rooms run, not this one.
+	Shadowed    bool    `json:"shadowed,omitempty"`
 	InstallHint string  `json:"installHint,omitempty"`
 	SignIn      string  `json:"signIn,omitempty"`
 	Op          *OpView `json:"op,omitempty"`
@@ -189,6 +192,9 @@ func (s *Service) agentView(e *Entry) AgentView {
 	}
 	v.Can.Rollback = managed && v.Managed.Previous != "" && !busy
 	v.Can.Remove = managed && !busy
+	if e.Register != nil && s.ownNames()[e.Register.Name] {
+		v.Shadowed = true
+	}
 	if e.Register != nil && !busy && (managed || v.External != nil) {
 		v.Can.Register, v.Can.Unregister = !v.Registered, v.Registered
 	}
