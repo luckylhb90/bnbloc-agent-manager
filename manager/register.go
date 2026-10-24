@@ -55,9 +55,33 @@ func (s *Service) registration() dropIn {
 			continue
 		}
 		r := e.Register
-		out.Agents = append(out.Agents, dropInEntry{Name: r.Name, Command: command, Args: r.Args, Env: r.Env, Profile: r.Profile, Permissions: r.Permissions})
+		env := r.Env
+		if r.CommandEnv != "" {
+			if served := s.servedCommand(e.For); served != "" {
+				env = map[string]string{}
+				for k, v := range r.Env {
+					env[k] = v
+				}
+				env[r.CommandEnv] = served
+			}
+		}
+		out.Agents = append(out.Agents, dropInEntry{Name: r.Name, Command: command, Args: r.Args, Env: env, Profile: r.Profile, Permissions: r.Permissions})
 	}
 	return out
+}
+
+// servedCommand is the command of the agent an adapter serves: its managed
+// copy, else the one found on the computer ("" when neither). Caller holds the
+// lock.
+func (s *Service) servedCommand(id string) string {
+	e, ok := s.cat().Entry(id)
+	if !ok {
+		return ""
+	}
+	if a := s.state.Agents[id]; a != nil && a.Version != "" && e.Install != nil {
+		return binPath(s.Store.versionDir(id, a.Version), e.Install.Bin)
+	}
+	return s.det[id].Command
 }
 
 // writeRegistration brings the drop-in file up to date: written atomically,

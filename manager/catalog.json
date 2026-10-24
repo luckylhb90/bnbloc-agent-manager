@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-24.3",
+  "version": "2026-10-24.4",
   "agents": [
     {
       "id": "claude",
@@ -184,6 +184,146 @@
       "signIn": "Run `opencode auth login` and sign in."
     },
     {
+      "id": "qwen",
+      "name": "Qwen Code",
+      "install": {
+        "method": "npm",
+        "package": "@qwen-code/qwen-code",
+        "bin": "qwen",
+        "requires": [
+          {
+            "tool": "node",
+            "min": "22",
+            "hint": "Install Node.js 22 or newer."
+          }
+        ]
+      },
+      "latest": {
+        "from": "npm"
+      },
+      "detect": {
+        "command": "qwen",
+        "args": [
+          "--version"
+        ]
+      },
+      "register": {
+        "name": "qwen",
+        "args": [
+          "--acp",
+          "--experimental-skills"
+        ]
+      },
+      "signIn": "Run `qwen` once and sign in."
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot CLI",
+      "install": {
+        "method": "npm",
+        "package": "@github/copilot",
+        "bin": "copilot"
+      },
+      "latest": {
+        "from": "npm"
+      },
+      "detect": {
+        "command": "copilot",
+        "args": [
+          "--version"
+        ]
+      },
+      "register": {
+        "name": "copilot",
+        "args": [
+          "--acp"
+        ]
+      },
+      "signIn": "Run `copilot` once and sign in."
+    },
+    {
+      "id": "cline",
+      "name": "Cline",
+      "install": {
+        "method": "npm",
+        "package": "cline",
+        "bin": "cline"
+      },
+      "latest": {
+        "from": "npm"
+      },
+      "detect": {
+        "command": "cline",
+        "args": [
+          "--version"
+        ]
+      },
+      "register": {
+        "name": "cline",
+        "args": [
+          "--acp"
+        ]
+      },
+      "signIn": "Run `cline` once and sign in."
+    },
+    {
+      "id": "kilo",
+      "name": "Kilo Code",
+      "install": {
+        "method": "npm",
+        "package": "@kilocode/cli",
+        "bin": "kilo"
+      },
+      "latest": {
+        "from": "npm"
+      },
+      "detect": {
+        "command": "kilo",
+        "args": [
+          "--version"
+        ]
+      },
+      "register": {
+        "name": "kilo",
+        "args": [
+          "acp"
+        ]
+      },
+      "signIn": "Run `kilo` once and sign in."
+    },
+    {
+      "id": "auggie",
+      "name": "Augment (auggie)",
+      "install": {
+        "method": "npm",
+        "package": "@augmentcode/auggie",
+        "bin": "auggie",
+        "requires": [
+          {
+            "tool": "node",
+            "min": "20",
+            "hint": "Install Node.js 20 or newer."
+          }
+        ]
+      },
+      "latest": {
+        "from": "npm"
+      },
+      "detect": {
+        "command": "auggie",
+        "args": [
+          "--version"
+        ]
+      },
+      "register": {
+        "name": "auggie",
+        "args": [
+          "--acp"
+        ]
+      },
+      "signIn": "Run `auggie login`."
+    },
+    {
       "id": "pi",
       "name": "pi",
       "install": {
@@ -208,6 +348,33 @@
         ]
       },
       "signIn": "Run `pi`, then `/login` inside it."
+    },
+    {
+      "id": "pi-acp",
+      "name": "ACP adapter for pi",
+      "for": "pi",
+      "install": {
+        "method": "npm",
+        "package": "pi-acp",
+        "bin": "pi-acp",
+        "requires": [
+          {
+            "tool": "node",
+            "min": "20",
+            "hint": "Install Node.js 20 or newer."
+          }
+        ]
+      },
+      "latest": {
+        "from": "npm"
+      },
+      "detect": {
+        "command": "pi-acp"
+      },
+      "register": {
+        "name": "pi",
+        "commandEnv": "PI_ACP_PI_COMMAND"
+      }
     },
     {
       "id": "omp",

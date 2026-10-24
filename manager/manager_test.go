@@ -1024,3 +1024,55 @@ func TestAnAgentMayBeWrittenOverSeveralLinesOrSeveralToALine(t *testing.T) {
 		t.Error("an unclosed object is not guessed at")
 	}
 }
+
+func TestAnAdapterIsToldWhereItsAgentIs(t *testing.T) {
+	fakeNPM(t)
+	reg := newRegistry(t, registryOpts{latest: "1.0.0", times: map[string]string{"1.0.0": "2026-01-01T00:00:00Z"}})
+	cat := `{"version":"t","agents":[
+	  {"id":"fake","name":"Fake","install":{"method":"npm","package":"fake-agent","bin":"fakeagent"},"latest":{"from":"npm"},"detect":{"command":"fakeagent","args":["--version"]}},
+	  {"id":"fake-acp","name":"Adapter","for":"fake","install":{"method":"npm","package":"fake-agent","bin":"fakeagent"},"latest":{"from":"npm"},"detect":{"command":"fakeacp"},
+	   "register":{"name":"fake","commandEnv":"FAKE_AGENT_COMMAND","env":{"KEEP":"1"}}}]}`
+	svc := newService(t, cat, reg)
+	// The agent is not on the computer: the adapter is registered without a path (it finds the agent itself).
+	if err := do(t, svc, "fake-acp", ActInstall); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(svc.ACPHome, DropInDir, DropInFile))
+	var doc struct {
+		Agents []struct {
+			Env map[string]string `json:"env"`
+		} `json:"agents"`
+	}
+	_ = json.Unmarshal(raw, &doc)
+	if len(doc.Agents) != 1 || len(doc.Agents[0].Env) != 1 || doc.Agents[0].Env["KEEP"] != "1" {
+		t.Fatalf("no agent, no path: %s", raw)
+	}
+	// Installed by the manager: the adapter is told that exact copy.
+	if err := do(t, svc, "fake", ActInstall); err != nil {
+		t.Fatal(err)
+	}
+	if err := do(t, svc, "fake-acp", ActUnregister); err != nil {
+		t.Fatal(err)
+	}
+	if err := do(t, svc, "fake-acp", ActRegister); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(svc.ACPHome, DropInDir, DropInFile))
+	doc.Agents = nil
+	_ = json.Unmarshal(raw, &doc)
+	want := binPath(svc.Store.versionDir("fake", "1.0.0"), "fakeagent")
+	if len(doc.Agents) != 1 || doc.Agents[0].Env["FAKE_AGENT_COMMAND"] != want || doc.Agents[0].Env["KEEP"] != "1" {
+		t.Errorf("the adapter is told where its agent is: %s", raw)
+	}
+	for name, bad := range map[string]string{
+		"a variable that changes how a process runs": `"register":{"name":"x","commandEnv":"NODE_OPTIONS"}`,
+		"a lower-case name":                          `"register":{"name":"x","commandEnv":"agent_cmd"}`,
+	} {
+		if _, err := ParseCatalog([]byte(`{"version":"x","agents":[{"id":"a","name":"A","detect":{"command":"a"}},{"id":"b","name":"B","for":"a","detect":{"command":"b"},` + bad + `}]}`)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	if _, err := ParseCatalog([]byte(`{"version":"x","agents":[{"id":"a","name":"A","detect":{"command":"a"},"register":{"name":"x","commandEnv":"X_CMD"}}]}`)); err == nil {
+		t.Error("commandEnv on an entry that serves no agent was accepted")
+	}
+}

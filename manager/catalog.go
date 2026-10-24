@@ -131,7 +131,13 @@ type Update struct {
 // Register is the entry the ACP core gets (the shape of its agents.json
 // entry, which it owns); Command is filled in with the installed path.
 type Register struct {
-	Name        string            `json:"name"`
+	Name string `json:"name"`
+	// CommandEnv names an environment variable of the launched adapter that is
+	// given the command of the agent it serves (an entry with `for`): the
+	// managed copy, else the one found on the computer. For an adapter that runs
+	// its agent by name and would not find a managed copy on the PATH. Nothing
+	// is set when the agent is not on the computer.
+	CommandEnv  string            `json:"commandEnv,omitempty"`
 	Args        []string          `json:"args,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	Profile     json.RawMessage   `json:"profile,omitempty"`
@@ -139,11 +145,22 @@ type Register struct {
 }
 
 var (
-	idRE        = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
-	packageRE   = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
-	binRE       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-	agentNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+	idRE         = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	packageRE    = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
+	binRE        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	agentNameRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+	commandEnvRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 )
+
+// deniedEnv is a variable that changes how a program loads or runs, which a
+// catalog's commandEnv may never name.
+func deniedEnv(name string) bool {
+	switch name {
+	case "PATH", "HOME", "NODE_OPTIONS", "BASH_ENV", "ENV", "SHELL", "IFS", "PYTHONPATH", "PYTHONSTARTUP":
+		return true
+	}
+	return strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "DYLD_") || strings.HasPrefix(name, "BNBLOC_")
+}
 
 // DefaultCatalog parses the catalog the binary ships.
 func DefaultCatalog() (*Catalog, error) { return ParseCatalog(embeddedCatalog) }
@@ -275,6 +292,9 @@ func (e *Entry) validate() error {
 	if r := e.Register; r != nil {
 		if !agentNameRE.MatchString(r.Name) {
 			return fmt.Errorf("register.name %q is not an agent name", r.Name)
+		}
+		if r.CommandEnv != "" && (!commandEnvRE.MatchString(r.CommandEnv) || deniedEnv(r.CommandEnv) || e.For == "") {
+			return fmt.Errorf("register.commandEnv %q must be an upper-case variable name that does not change how a process runs, on an entry with `for`", r.CommandEnv)
 		}
 		for _, raw := range []json.RawMessage{r.Profile, r.Permissions} {
 			if len(raw) > 0 && !json.Valid(raw) {
