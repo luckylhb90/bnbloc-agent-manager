@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-24.4",
+  "version": "2026-10-24.5",
   "agents": [
     {
       "id": "claude",
@@ -322,6 +322,31 @@
         ]
       },
       "signIn": "Run `auggie login`."
+    },
+    {
+      "id": "deepseek-harness",
+      "name": "DeepSeek Harness (dsh)",
+      "install": {
+        "method": "npm",
+        "package": "@deepseek-ai/dsh",
+        "bin": "dsh"
+      },
+      "latest": {
+        "from": "npm"
+      },
+      "detect": {
+        "command": "dsh",
+        "args": [
+          "--version"
+        ]
+      },
+      "register": {
+        "name": "dsh",
+        "args": [
+          "--profile",
+          "acp"
+        ]
+      }
     },
     {
       "id": "pi",

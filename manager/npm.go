@@ -82,6 +82,10 @@ func (s *Service) latestFromRegistry(ctx context.Context, pkg string, holdDays i
 		if !ValidVersion(v) || Compare(v, latest) > 0 {
 			continue
 		}
+		// A pre-release is offered only when the registry's own latest is one.
+		if prerelease(v) != "" && prerelease(latest) == "" {
+			continue
+		}
 		if t, ok := doc.Time[v]; !ok || t.After(cutoff) {
 			continue
 		}

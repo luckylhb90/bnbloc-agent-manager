@@ -154,10 +154,25 @@ func TestVersionHelpers(t *testing.T) {
 		}
 	}
 	// A version names a directory and an install command: nothing else passes.
-	for _, v := range []string{"", "1.2", "1.2.3-beta", "../1.2.3", "1.2.3/..", "v1.2.3", "1.2.3 ", "latest", "1234567890.1.1"} {
+	for _, v := range []string{"", "1.2", "1.2.3-", "1.2.3-beta/../x", "1.2.3+build", "1.2.3-a..b", "../1.2.3", "1.2.3/..", "v1.2.3", "1.2.3 ", "latest", "1234567890.1.1"} {
 		if ValidVersion(v) {
 			t.Errorf("%q must not be valid", v)
 		}
+	}
+	for _, v := range []string{"0.2.1-rc.2", "1.0.0-alpha", "1.0.0-beta.11", "1.0.0-x-y.1"} {
+		if !ValidVersion(v) {
+			t.Errorf("%q should be valid", v)
+		}
+	}
+	// semver order: a release is above its pre-releases, parts compare one by one.
+	ordered := []string{"0.2.1-alpha.5", "0.2.1-rc.2", "0.2.1-rc.3", "0.2.1-rc.10", "0.2.1", "0.2.2-rc.1", "0.10.0"}
+	for i := 1; i < len(ordered); i++ {
+		if Compare(ordered[i-1], ordered[i]) != -1 || Compare(ordered[i], ordered[i-1]) != 1 {
+			t.Errorf("%s should sort below %s", ordered[i-1], ordered[i])
+		}
+	}
+	if got := ParseVersion("dsh 0.2.1-rc.2\n", nil); got != "0.2.1-rc.2" {
+		t.Errorf("a pre-release is read whole: %q", got)
 	}
 	if got := ParseVersion("Hermes Agent v0.12.0 (2026.4.30)", nil); got != "0.12.0" {
 		t.Errorf("first x.y.z of the output: %q", got)
