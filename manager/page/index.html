@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent manager</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1b1d21; --muted:#6b7280; --line:#e5e7eb; --card:#f8f9fb; --accent:#2f5bea; --ok:#15803d; --warn:#b45309; --bad:#b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161a; --fg:#e8eaed; --muted:#9aa1ad; --line:#2a2e36; --card:#1b1e24; --accent:#7b9bff; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; } }
+  :root[data-theme="light"] { color-scheme: light; --bg:#fff; --fg:#1b1d21; --muted:#6b7280; --line:#e5e7eb; --card:#f8f9fb; --accent:#2f5bea; --ok:#15803d; --warn:#b45309; --bad:#b91c1c; }
+  :root[data-theme="dark"] { color-scheme: dark; --bg:#14161a; --fg:#e8eaed; --muted:#9aa1ad; --line:#2a2e36; --card:#1b1e24; --accent:#7b9bff; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+  h1 { font-size:18px; margin:0; flex:1; }
+  .sub { color:var(--muted); margin:0 0 16px; }
+  .notes { border:1px solid var(--warn); border-radius:8px; padding:8px 12px; margin-bottom:12px; color:var(--warn); }
+  .card { border:1px solid var(--line); background:var(--card); border-radius:10px; padding:12px 14px; margin-bottom:10px; }
+  .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .name { font-weight:600; flex:1; min-width:140px; }
+  .chip { border-radius:999px; padding:2px 10px; font-size:12px; border:1px solid var(--line); white-space:nowrap; }
+  .chip.ok { color:var(--ok); border-color:var(--ok); } .chip.warn { color:var(--warn); border-color:var(--warn); } .chip.bad { color:var(--bad); border-color:var(--bad); } .chip.busy { color:var(--accent); border-color:var(--accent); }
+  .detail, .hint { color:var(--muted); margin-top:6px; font-size:13px; word-break:break-word; }
+  .hint code, .cmd { font:12px ui-monospace,Menlo,Consolas,monospace; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px; }
+  .cmd { display:block; padding:6px 8px; margin:6px 0; word-break:break-all; color:var(--fg); }
+  .err { color:var(--bad); margin-top:6px; }
+  button { font:inherit; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:7px; padding:4px 12px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  details { margin-top:8px; } summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  pre { margin:6px 0 0; padding:8px; max-height:180px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; font:12px/1.4 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-all; }
+  footer { color:var(--muted); font-size:12px; margin-top:14px; }
+  .toggle { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<header><h1>Agent manager</h1><button id="refresh">Check now</button></header>
+<p class="sub">The coding agents on this computer: what is installed, what is newer, and which ones your rooms can use. Nothing is installed or changed until you click.</p>
+<div id="notes"></div>
+<div id="list"><p class="sub">Looking at this computer…</p></div>
+<footer id="foot"></footer>
+<script src="page.js"></script>
+</body>
+</html>

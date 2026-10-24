@@ -1,0 +1,104 @@
+{
+  "version": "2026-10-24.1",
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code (ACP adapter)",
+      "install": {
+        "method": "npm",
+        "package": "@agentclientprotocol/claude-agent-acp",
+        "bin": "claude-agent-acp",
+        "requires": [{ "tool": "node", "min": "22", "hint": "Install Node.js 22 or newer." }]
+      },
+      "latest": { "from": "npm" },
+      "detect": { "command": "claude-agent-acp" },
+      "register": {
+        "name": "claude",
+        "profile": { "instructionsVia": "meta", "skillsDir": ".claude/skills" }
+      },
+      "signIn": "Run `claude` once and sign in."
+    },
+    {
+      "id": "codex",
+      "name": "Codex (ACP adapter)",
+      "install": {
+        "method": "npm",
+        "package": "@agentclientprotocol/codex-acp",
+        "bin": "codex-acp"
+      },
+      "latest": { "from": "npm" },
+      "detect": { "command": "codex-acp" },
+      "register": {
+        "name": "codex",
+        "profile": { "instructionsVia": "file:AGENTS.md", "skillsDir": ".agents/skills" }
+      },
+      "signIn": "Run `codex` once and sign in."
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "install": {
+        "method": "npm",
+        "package": "@google/gemini-cli",
+        "bin": "gemini",
+        "requires": [{ "tool": "node", "min": "20", "hint": "Install Node.js 20 or newer." }]
+      },
+      "latest": { "from": "npm" },
+      "detect": { "command": "gemini", "args": ["--version"] },
+      "register": { "name": "gemini", "args": ["--acp"] },
+      "signIn": "Run `gemini` once and sign in."
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "install": {
+        "method": "npm",
+        "package": "opencode-ai",
+        "bin": "opencode",
+        "ignoreScripts": false
+      },
+      "latest": { "from": "npm" },
+      "detect": { "command": "opencode", "args": ["--version"] },
+      "found": [
+        { "kind": "vendor-installer", "contains": "/.opencode/" }
+      ],
+      "update": [
+        { "kind": "vendor-installer", "args": ["upgrade"], "pinArgs": ["upgrade", "{version}"] }
+      ],
+      "register": {
+        "name": "opencode",
+        "args": ["acp"],
+        "profile": { "instructionsVia": "file:AGENTS.md", "skillsDir": ".opencode/skills" }
+      },
+      "signIn": "Run `opencode auth login` and sign in."
+    },
+    {
+      "id": "pi",
+      "name": "pi",
+      "install": {
+        "method": "npm",
+        "package": "@earendil-works/pi-coding-agent",
+        "bin": "pi",
+        "requires": [{ "tool": "node", "min": "22.19", "hint": "Install Node.js 22.19 or newer." }]
+      },
+      "latest": { "from": "npm" },
+      "detect": { "command": "pi", "args": ["--version"] },
+      "signIn": "Run `pi`, then `/login` inside it."
+    },
+    {
+      "id": "hermes",
+      "name": "Hermes Agent",
+      "installHint": "Hermes installs with its own installer. macOS, Linux and WSL2: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash. Windows (PowerShell): iex (irm https://hermes-agent.nousresearch.com/install.ps1). Then reopen this page.",
+      "detect": { "command": "hermes", "args": ["--version"], "parse": "v(\\d+\\.\\d+\\.\\d+)" },
+      "found": [
+        { "kind": "source", "dir": "~/.hermes/hermes-agent" },
+        { "kind": "source", "dir": "${LOCALAPPDATA}/hermes/hermes-agent" }
+      ],
+      "update": [
+        { "kind": "source", "args": ["update", "--no-gateway-restart"] }
+      ],
+      "register": { "name": "hermes", "args": ["acp"] },
+      "signIn": "Run `hermes setup` and choose a provider."
+    }
+  ]
+}
