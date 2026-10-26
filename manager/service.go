@@ -38,6 +38,12 @@ type Service struct {
 	SettingsFile string
 	// ACPHome is the ACP core's home ("" = nothing is registered).
 	ACPHome string
+	// MountRoot is the folder the desktop gives this app inside the workspaces
+	// root (the one folder the sandbox machine shares), MountsFile the file the
+	// bridge reads the sandbox mounts from and GuestBase the folder of the guest
+	// the agents appear under. All three empty: the app is not under the desktop,
+	// and no agent can be put in the sandbox.
+	MountRoot, MountsFile, GuestBase string
 	// RegistryURL is the npm registry (https only; "" = DefaultRegistry).
 	RegistryURL string
 	HTTP        *http.Client
@@ -203,6 +209,9 @@ func (s *Service) autoUpdate() {
 	}
 	for i := range s.cat().Agents {
 		e := &s.cat().Agents[i]
+		if e.Sandbox != nil {
+			continue // a conversation resumes with the new version: only on a click
+		}
 		v := s.agentView(e)
 		if v.Managed == nil || !v.Can.Update || !v.UpdateAvailable || v.Op != nil && v.Op.Running {
 			continue
@@ -431,6 +440,9 @@ func (s *Service) managedVersion(id string) (cur, prev string) {
 }
 
 func (s *Service) doInstall(ctx context.Context, op *operation, e *Entry) error {
+	if e.Sandbox != nil {
+		return s.installInSandbox(ctx, op, e)
+	}
 	if e.Install == nil && e.InstallRun != nil {
 		return s.runInstaller(ctx, op, e)
 	}
@@ -497,6 +509,9 @@ func (s *Service) updateManaged(ctx context.Context, op *operation, e *Entry, cu
 	if v == cur {
 		op.logf("%s is already at %s", e.Name, cur)
 		return nil
+	}
+	if e.Sandbox != nil {
+		return s.updateInSandbox(ctx, op, e, cur, v)
 	}
 	if e.Install == nil {
 		return errors.New("the manager does not install " + e.Name)
@@ -591,7 +606,7 @@ func (s *Service) doRollback(op *operation, e *Entry) error {
 	if cur == "" || prev == "" {
 		return errors.New("there is no earlier version to go back to")
 	}
-	if _, err := os.Stat(s.Store.versionDir(e.ID, prev)); err != nil {
+	if _, err := os.Stat(s.storeOf(e).versionDir(e.ID, prev)); err != nil {
 		return fmt.Errorf("the earlier version %s is gone from disk", prev)
 	}
 	op.logf("going back from %s to %s", cur, prev)
@@ -606,7 +621,11 @@ func (s *Service) doRemove(op *operation, e *Entry) error {
 	if cur == "" {
 		return errors.New("the manager did not install this agent and does not remove it")
 	}
-	if held := s.heldVersions(e.ID); len(held) > 0 {
+	if e.Sandbox != nil {
+		if s.heldInSandbox(e) {
+			return fmt.Errorf("a room may still be running %s: removing it now would end that conversation. Remove it when no room uses it (the app restarting ends them)", e.Name)
+		}
+	} else if held := s.heldVersions(e.ID); len(held) > 0 {
 		return fmt.Errorf("a room is still running %s %s: removing it now would end that conversation. A room keeps its agent until the app restarts, so remove it then", e.Name, strings.Join(held, ", "))
 	}
 	op.logf("removing %s", e.Name)
@@ -617,7 +636,7 @@ func (s *Service) doRemove(op *operation, e *Entry) error {
 	}); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(s.Store.agentDir(e.ID)); err != nil {
+	if err := os.RemoveAll(s.storeOf(e).agentDir(e.ID)); err != nil {
 		return fmt.Errorf("some files could not be removed (an agent may be running from them); try again later: %w", err)
 	}
 	return nil

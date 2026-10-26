@@ -45,6 +45,10 @@ type Entry struct {
 	// manager does not install it and InstallHint says how the member does.
 	Install     *Install `json:"install,omitempty"`
 	InstallHint string   `json:"installHint,omitempty"`
+	// Sandbox makes the agent one that lives only in the member's sandbox:
+	// nothing is installed or run on this computer (sandbox.go). Such an entry
+	// has no Install and needs no Detect.
+	Sandbox *SandboxInstall `json:"sandbox,omitempty"`
 	// Latest says where the newest version is read from.
 	Latest *Latest `json:"latest,omitempty"`
 	// Detect finds an install the manager did not make.
@@ -230,7 +234,15 @@ func (e *Entry) validate() error {
 	if strings.TrimSpace(e.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	if e.Detect.Command == "" || strings.ContainsAny(e.Detect.Command, `/\ `) {
+	if e.Sandbox != nil {
+		// Nothing of a sandbox agent is on this computer to look for.
+		if e.Detect.Command != "" {
+			return fmt.Errorf("a sandbox agent has no detect: none of it is on this computer")
+		}
+		if err := e.Sandbox.validate(e); err != nil {
+			return err
+		}
+	} else if e.Detect.Command == "" || strings.ContainsAny(e.Detect.Command, `/\ `) {
 		return fmt.Errorf("detect.command must be a bare command name")
 	}
 	if e.Detect.Parse != "" {

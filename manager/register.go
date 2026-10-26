@@ -21,12 +21,15 @@ const (
 )
 
 type dropInEntry struct {
-	Name        string            `json:"name"`
-	Command     string            `json:"command"`
-	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	Profile     json.RawMessage   `json:"profile,omitempty"`
-	Permissions json.RawMessage   `json:"permissions,omitempty"`
+	Name    string            `json:"name"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	// Sandbox "guest": the agent exists only in the member's sandbox and Command
+	// is a command line of the guest (the ACP core's own field).
+	Sandbox     string          `json:"sandbox,omitempty"`
+	Profile     json.RawMessage `json:"profile,omitempty"`
+	Permissions json.RawMessage `json:"permissions,omitempty"`
 }
 
 type dropIn struct {
@@ -43,6 +46,12 @@ func (s *Service) registration() dropIn {
 		e := &s.cat().Agents[i]
 		a := s.state.Agents[e.ID]
 		if e.Register == nil || a == nil || !a.Registered || !e.RunsHere() || !set.Allows(e.ID) {
+			continue
+		}
+		if e.Sandbox != nil {
+			if a.Version != "" && s.SandboxReady() {
+				out.Agents = append(out.Agents, dropInEntry{Name: e.Register.Name, Command: guestCommand(e), Args: e.Register.Args, Sandbox: "guest", Profile: e.Register.Profile, Permissions: e.Register.Permissions})
+			}
 			continue
 		}
 		command := ""
@@ -88,6 +97,9 @@ func (s *Service) servedCommand(id string) string {
 // only when its content changed (the core reloads on a change), removed when
 // no agent is registered. With no ACP home known it does nothing.
 func (s *Service) writeRegistration() error {
+	if err := s.writeMounts(); err != nil {
+		return err
+	}
 	if s.ACPHome == "" {
 		return nil
 	}

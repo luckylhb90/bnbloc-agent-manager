@@ -82,6 +82,9 @@ type AgentView struct {
 	Can        Can    `json:"can"`
 	Registered bool   `json:"registered"`
 	HasACP     bool   `json:"hasACP"`
+	// Sandbox: the agent lives only in the member's sandbox (nothing of it is
+	// installed or run on this computer).
+	Sandbox bool `json:"sandbox,omitempty"`
 	// Shadowed: the member's own agents.json defines the name this row is given
 	// to rooms under, so their entry is the one rooms run, not this one.
 	Shadowed    bool    `json:"shadowed,omitempty"`
@@ -128,7 +131,7 @@ func (s *Service) agentView(e *Entry) AgentView {
 		ID: e.ID, Name: e.Name, For: e.For, Source: e.Source, Adapter: s.adapterOf(e.ID), Pinned: pin, HasACP: e.Register != nil,
 		InstallHint: e.InstallHint, SignIn: e.SignIn,
 		Latest: a.Latest, CheckedAt: a.CheckedAt, CheckError: a.CheckErr,
-		Registered: a.Registered && e.Register != nil,
+		Registered: a.Registered && e.Register != nil, Sandbox: e.Sandbox != nil,
 	}
 	if op != nil {
 		v.Op = op.view()
@@ -145,9 +148,12 @@ func (s *Service) agentView(e *Entry) AgentView {
 
 	managed := a.Version != ""
 	if managed {
-		v.Managed = &Managed{Version: a.Version, Previous: a.Previous, InstalledAt: a.InstalledAt, SizeBytes: s.size(e.ID, a.Version, a.Previous), Held: held(s.heldVersions(e.ID), a.Version, a.Previous)}
+		v.Managed = &Managed{Version: a.Version, Previous: a.Previous, InstalledAt: a.InstalledAt, SizeBytes: s.size(e, a.Version, a.Previous)}
+		if e.Sandbox == nil {
+			v.Managed.Held = held(s.heldVersions(e.ID), a.Version, a.Previous)
+		}
 		if a.Previous != "" {
-			if _, err := os.Stat(s.Store.versionDir(e.ID, a.Previous)); err != nil {
+			if _, err := os.Stat(s.storeOf(e).versionDir(e.ID, a.Previous)); err != nil {
 				v.Managed.Previous = ""
 			}
 		}
@@ -186,7 +192,10 @@ func (s *Service) agentView(e *Entry) AgentView {
 		}
 	}
 
-	v.Can.Install = (e.Install != nil || e.InstallRun != nil) && !managed && v.External == nil && !busy
+	v.Can.Install = (e.Install != nil || e.InstallRun != nil || e.Sandbox != nil && s.SandboxReady()) && !managed && v.External == nil && !busy
+	if e.Sandbox != nil && !s.SandboxReady() && !managed {
+		v.Reason = "This agent runs only in your sandbox, which needs the desktop app with the sandbox on."
+	}
 	if e.InstallRun != nil && v.Can.Install {
 		v.InstallCommand = e.InstallRun.Command + " " + strings.Join(e.InstallRun.Args, " ")
 	}
@@ -205,7 +214,7 @@ func (s *Service) agentView(e *Entry) AgentView {
 	switch {
 	case busy:
 	case managed:
-		v.Can.Update = v.UpdateAvailable && e.Install != nil
+		v.Can.Update = v.UpdateAvailable && (e.Install != nil || e.Sandbox != nil)
 	case v.External != nil:
 		s.externalUpdate(e, &v, pin)
 	}
@@ -254,7 +263,8 @@ func (s *Service) externalUpdate(e *Entry, v *AgentView, pin string) {
 
 // size is the bytes an agent's kept versions hold, measured once per
 // (versions kept) so a page polling every second does not walk the disk.
-func (s *Service) size(id string, kept ...string) int64 {
+func (s *Service) size(e *Entry, kept ...string) int64 {
+	id := e.ID
 	key := id + "\x00" + strings.Join(kept, "\x00")
 	s.mu.Lock()
 	if c, ok := s.sizes[id]; ok && c.key == key {
@@ -262,7 +272,7 @@ func (s *Service) size(id string, kept ...string) int64 {
 		return c.n
 	}
 	s.mu.Unlock()
-	n := dirSize(s.Store.agentDir(id))
+	n := dirSize(s.storeOf(e).agentDir(id))
 	s.mu.Lock()
 	if s.sizes == nil {
 		s.sizes = map[string]sizeEntry{}

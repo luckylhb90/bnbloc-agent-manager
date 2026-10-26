@@ -33,6 +33,9 @@ const versionTimeout = 10 * time.Second
 // PATH this process has (the desktop gives its children the member's
 // login-shell environment).
 func (s *Service) detect(ctx context.Context, e *Entry) Detected {
+	if e.Detect.Command == "" {
+		return Detected{} // a sandbox agent: nothing of it is on this computer
+	}
 	path, err := exec.LookPath(e.Detect.Command)
 	if err != nil {
 		return Detected{}

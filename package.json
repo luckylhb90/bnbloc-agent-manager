@@ -2,16 +2,21 @@
   "kind": "bnbloc.plugin.package/v1",
   "contract": "bnbloc.plugin.contract/v1",
   "name": "agent-manager",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "publisher": "bnbloc",
   "description": "See the coding agents on your computer, install and update them, and give them to your rooms. Nothing is installed or changed until you click.",
   "runtime": "sidecar",
+  "capabilities": [
+    "sandbox-mounts"
+  ],
   "sidecar": {
     "localUrl": "http://127.0.0.1:7193",
     "listenEnv": "BNBLOC_AGENT_MANAGER_LISTEN_ADDR",
     "supervisedEnv": "BNBLOC_AGENT_MANAGER_SUPERVISED",
     "tokenEnv": "BNBLOC_AGENT_MANAGER_TOKEN",
-    "dataDirEnv": "BNBLOC_AGENT_MANAGER_DATA_DIR"
+    "dataDirEnv": "BNBLOC_AGENT_MANAGER_DATA_DIR",
+    "mountsEnv": "BNBLOC_AGENT_MANAGER_MOUNTS_FILE",
+    "mountRootEnv": "BNBLOC_AGENT_MANAGER_MOUNT_ROOT"
   },
   "panel": {
     "entry": "index.html",

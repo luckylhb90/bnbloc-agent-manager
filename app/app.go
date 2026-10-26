@@ -13,6 +13,9 @@
 //	BNBLOC_AGENT_MANAGER_DATA_DIR     the private folder (state, installed agents)
 //	BNBLOC_AGENT_MANAGER_SUPERVISED   set when the desktop owns stdin (exit on EOF)
 //	BNBLOC_AGENT_MANAGER_ACP_HOME     the ACP core's home (default: its usual place)
+//	BNBLOC_AGENT_MANAGER_MOUNTS_FILE  the file the sandbox bridge reads this app's mounts from
+//	BNBLOC_AGENT_MANAGER_MOUNT_ROOT   the folder inside the workspaces root this app may fill
+//	                                  (both set by the desktop; without them no agent goes to the sandbox)
 //
 // and the platform's own BNBLOC_COMPONENT_SETTINGS_FILE.
 //
@@ -51,6 +54,8 @@ const (
 	envDataDir    = "BNBLOC_AGENT_MANAGER_DATA_DIR"
 	envSupervised = "BNBLOC_AGENT_MANAGER_SUPERVISED"
 	envACPHome    = "BNBLOC_AGENT_MANAGER_ACP_HOME"
+	envMounts     = "BNBLOC_AGENT_MANAGER_MOUNTS_FILE"
+	envMountRoot  = "BNBLOC_AGENT_MANAGER_MOUNT_ROOT"
 	envSettings   = "BNBLOC_COMPONENT_SETTINGS_FILE"
 )
 
@@ -125,6 +130,14 @@ func newService(cat *manager.Catalog, version, dataDir, acpHome, settings string
 	svc := &manager.Service{
 		Catalog: cat, Store: manager.Store{Dir: dataDir}, SettingsFile: settings,
 		ACPHome: acpHome, Version: version,
+		MountRoot: os.Getenv(envMountRoot), MountsFile: os.Getenv(envMounts),
+	}
+	if svc.MountRoot != "" && svc.MountsFile != "" {
+		// The guest sees the member's home path as its mount root (the bridge's
+		// default allowed folder); the agents appear under a folder of ours.
+		if home, err := os.UserHomeDir(); err == nil {
+			svc.GuestBase = filepath.Join(home, ".bnbloc-agents")
+		}
 	}
 	if err := svc.Init(); err != nil {
 		return nil, err

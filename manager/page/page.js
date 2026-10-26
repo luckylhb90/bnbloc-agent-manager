@@ -68,7 +68,7 @@ function chip(a) {
 function detail(a) {
   const bits = [];
   if (a.managed) {
-    bits.push("Managed here · " + mb(a.managed.sizeBytes));
+    bits.push((a.sandbox ? "In your sandbox, not on this computer" : "Managed here") + " · " + mb(a.managed.sizeBytes));
     if (a.managed.previous) bits.push("earlier version " + a.managed.previous + " kept");
     if (a.managed.held && a.managed.held.length) bits.push("kept for a room still using " + a.managed.held.join(", ") + " (removed when it no longer needs it)");
     if (a.pinned) bits.push("pinned by your organization to " + a.pinned);
@@ -120,6 +120,7 @@ function card(a) {
       h("button", { class: "primary", onclick: () => act(a.id, "update") }, "Run"), " ", h("button", { onclick: () => { confirming = null; render(); } }, "Cancel")));
   }
   if (a.reason && !(a.can.install || a.can.update) && a.status !== "unsupported") body.push(h("div", { class: "hint" }, a.reason));
+  if (a.sandbox && a.status === "absent" && a.can.install) body.push(h("div", { class: "hint" }, "Runs only in your sandbox: nothing of it is installed or run on this computer, and every room shares the one copy. It works with free models without signing in."));
   if (a.status === "absent" && a.installHint) body.push(h("div", { class: "hint" }, a.installHint));
   if (a.status === "installed" && a.signIn && a.managed && !busy) body.push(h("div", { class: "hint" }, a.signIn));
   if (actionError[a.id]) body.push(h("div", { class: "err" }, actionError[a.id]));
