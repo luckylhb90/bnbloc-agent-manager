@@ -88,6 +88,10 @@ func (in *SandboxInstall) guestPackage() string {
 	return strings.ReplaceAll(in.Package, "{cpu}", guestCPU())
 }
 
+// sandboxSignIn is shown for an agent that lives in the sandbox: a login is a
+// terminal flow the sandbox does not offer yet (design §5).
+const sandboxSignIn = "Signing in to a provider from the sandbox is not available yet; free models work without it."
+
 // SandboxReady reports whether the desktop gave this app the places a sandbox
 // agent needs: the folder the machine shares and the file the bridge reads the
 // mounts from.

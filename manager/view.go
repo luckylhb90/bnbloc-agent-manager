@@ -41,6 +41,9 @@ type SandboxOfferView struct {
 	Note     string `json:"note,omitempty"`
 	// Only: the organization offers this agent only in the sandbox.
 	Only bool `json:"only,omitempty"`
+	// HostToo: the agent can also be installed on this computer, so the button
+	// must say where.
+	HostToo bool `json:"hostToo,omitempty"`
 }
 
 // Can lists what the page may offer for the row.
@@ -144,12 +147,17 @@ func (s *Service) agentView(e *Entry) AgentView {
 		Latest: a.Latest, CheckedAt: a.CheckedAt, CheckError: a.CheckErr,
 		Registered: a.Registered && e.Register != nil, Sandbox: placementIn(&a) == PlaceSandbox,
 	}
+	if v.Sandbox {
+		// What the host install tells the member to do (sign in in a terminal) is not
+		// available in the sandbox.
+		v.SignIn = sandboxSignIn
+	}
 	sandboxOnly := false
 	if e.Sandbox != nil {
 		s.mu.Lock()
 		sandboxOnly = s.Settings.SandboxOnly[e.ID]
 		s.mu.Unlock()
-		v.SandboxOffer = &SandboxOfferView{ApproxMB: e.Sandbox.ApproxMB, Note: e.Sandbox.Note, Only: sandboxOnly}
+		v.SandboxOffer = &SandboxOfferView{ApproxMB: e.Sandbox.ApproxMB, Note: e.Sandbox.Note, Only: sandboxOnly, HostToo: e.Install != nil || e.InstallRun != nil || len(e.Found) > 0 || e.Detect.Command != ""}
 	}
 	if op != nil {
 		v.Op = op.view()

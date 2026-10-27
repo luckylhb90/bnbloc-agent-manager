@@ -91,7 +91,7 @@ function card(a) {
     if (a.installCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id + ":install"; render(); } }, both ? "Install on this computer" : "Install"));
     else add(both ? "Install on this computer" : "Install", "install", true);
   }
-  if (a.can.installSandbox) add(a.can.install ? "Install in my sandbox" : "Install", "install-sandbox", !a.can.install);
+  if (a.can.installSandbox) add(a.sandboxOffer && a.sandboxOffer.hostToo ? "Install in my sandbox" : "Install", "install-sandbox", !a.can.install && !a.external);
   if (a.can.update) {
     if (a.external && a.updateCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id; render(); } }, a.updateUnknown ? "Run its updater" : "Update"));
     else add("Update", "update", true);

@@ -409,6 +409,9 @@ func TestTheMemberChoosesWhereAnAgentIsInstalledAndTheChoiceIsFollowed(t *testin
 		t.Fatalf("placement %q", got)
 	}
 	v = view(svc, "fake")
+	if v.SignIn != sandboxSignIn {
+		t.Errorf("the host's sign-in line does not apply in the sandbox: %q", v.SignIn)
+	}
 	if !v.Sandbox || v.Can.Install || v.Can.InstallSandbox || v.Managed == nil || v.Managed.Version != "2.0.0" {
 		t.Errorf("once installed in the sandbox, neither install is offered: %+v", v)
 	}
