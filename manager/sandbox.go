@@ -39,6 +39,15 @@ type SandboxInstall struct {
 	Package string `json:"package"`
 	// Bin is the agent's program inside the tarball (below its root).
 	Bin string `json:"bin"`
+	// Latest is the npm package the newest sandbox version is read from, when
+	// it is not the entry's own (an agent whose newest generation ships under
+	// another name).
+	Latest string `json:"latest,omitempty"`
+	// ApproxMB is shown before the choice is made: what the one copy takes.
+	ApproxMB int `json:"approxMB,omitempty"`
+	// Note says what differs from installing on this computer (shown on the
+	// choice).
+	Note string `json:"note,omitempty"`
 }
 
 var sandboxBinRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
@@ -50,17 +59,17 @@ func (in *SandboxInstall) validate(e *Entry) error {
 	if !sandboxBinRE.MatchString(in.Bin) {
 		return fmt.Errorf("sandbox.bin %q is not a path inside the package", in.Bin)
 	}
-	if e.Install != nil {
-		return errors.New("an agent is installed on this computer or in the sandbox, not both (give the sandbox one its own entry)")
+	if in.Latest != "" && !packageRE.MatchString(in.Latest) {
+		return fmt.Errorf("sandbox.latest %q is not an npm package name", in.Latest)
 	}
-	if e.Latest == nil || e.Latest.Package == "" {
-		return errors.New("a sandbox agent needs latest.package: the version is read from the registry")
+	if in.Latest == "" && e.Package() == "" {
+		return errors.New("a sandbox agent needs a package to read its version from (sandbox.latest, latest.package or install.package)")
 	}
 	if e.Register == nil {
 		return errors.New("a sandbox agent needs register: rooms are the only way to run it")
 	}
-	if len(e.Register.Env) > 0 || e.Register.CommandEnv != "" {
-		return errors.New("a sandbox agent takes no register.env or commandEnv: its environment is the sandbox's")
+	if e.For != "" {
+		return errors.New("an adapter is not put in the sandbox")
 	}
 	return nil
 }
@@ -90,12 +99,53 @@ func (s *Service) SandboxReady() bool {
 // <mount root>/agents/<id>/<version>.
 func (s *Service) sandboxStore() Store { return Store{Dir: s.MountRoot} }
 
+// PlaceSandbox and PlaceHost say where a managed install lives.
+const (
+	PlaceHost    = "host"
+	PlaceSandbox = "sandbox"
+)
+
+// placementOf is where the manager's install of the agent lives ("" when it
+// has none): recorded when it was installed, never guessed.
+func (s *Service) placementOf(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return placementIn(s.state.Agents[id])
+}
+
+func placementIn(a *AgentState) string {
+	switch {
+	case a == nil || a.Version == "":
+		return ""
+	case a.Method == "sandbox":
+		return PlaceSandbox
+	}
+	return PlaceHost
+}
+
 // storeOf is where the versions of an agent live.
 func (s *Service) storeOf(e *Entry) Store {
-	if e.Sandbox != nil {
+	if s.placementOf(e.ID) == PlaceSandbox {
 		return s.sandboxStore()
 	}
 	return s.Store
+}
+
+// sandboxPackage is the npm package the sandbox's newest version is read from.
+func (e *Entry) sandboxPackage() string {
+	if e.Sandbox != nil && e.Sandbox.Latest != "" {
+		return e.Sandbox.Latest
+	}
+	return e.Package()
+}
+
+// packageIn is the package the newest version of the agent in a placement is
+// read from.
+func (e *Entry) packageIn(placement string) string {
+	if placement == PlaceSandbox {
+		return e.sandboxPackage()
+	}
+	return e.Package()
 }
 
 // mountEnv is the variable that names an agent's folder in every room's space.
@@ -405,7 +455,7 @@ func (s *Service) mountsDoc() []mountEntry {
 	for i := range s.cat().Agents {
 		e := &s.cat().Agents[i]
 		a := s.state.Agents[e.ID]
-		if e.Sandbox == nil || a == nil || a.Version == "" || !a.Registered || !s.Settings.Allows(e.ID) {
+		if e.Sandbox == nil || placementIn(a) != PlaceSandbox || !a.Registered || !s.Settings.Allows(e.ID) {
 			continue
 		}
 		out = append(out, mountEntry{
@@ -463,10 +513,17 @@ func (s *Service) heldInSandbox(e *Entry) bool {
 // installInSandbox installs the newest allowed version of a sandbox agent and
 // gives it to rooms.
 func (s *Service) installInSandbox(ctx context.Context, op *operation, e *Entry) error {
-	if cur, _ := s.managedVersion(e.ID); cur != "" {
-		return fmt.Errorf("%s %s is already installed; use update", e.Name, cur)
+	if e.Sandbox == nil {
+		return fmt.Errorf("%s cannot be put in the sandbox", e.Name)
 	}
-	v, err := s.target(ctx, e)
+	if cur, _ := s.managedVersion(e.ID); cur != "" {
+		where := "on this computer"
+		if s.placementOf(e.ID) == PlaceSandbox {
+			where = "in your sandbox"
+		}
+		return fmt.Errorf("%s %s is already installed %s; remove it first to put it somewhere else", e.Name, cur, where)
+	}
+	v, err := s.targetIn(ctx, e, PlaceSandbox)
 	if err != nil {
 		return err
 	}
@@ -500,4 +557,11 @@ func (s *Service) updateInSandbox(ctx context.Context, op *operation, e *Entry, 
 	}
 	s.sandboxStore().Prune(e.ID, v, cur)
 	return nil
+}
+
+// sandboxOnly reports an agent the organization offers only in the sandbox.
+func (s *Service) sandboxOnly(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Settings.SandboxOnly[id]
 }

@@ -21,13 +21,16 @@ import (
 
 // Actions a member (or the page) asks for.
 const (
-	ActInstall    = "install"
-	ActUpdate     = "update"
-	ActRollback   = "rollback"
-	ActRemove     = "remove"
-	ActCheck      = "check"
-	ActRegister   = "register"
-	ActUnregister = "unregister"
+	ActInstall = "install"
+	// ActInstallSandbox puts the agent in the member's sandbox instead of on
+	// this computer (sandbox.go).
+	ActInstallSandbox = "install-sandbox"
+	ActUpdate         = "update"
+	ActRollback       = "rollback"
+	ActRemove         = "remove"
+	ActCheck          = "check"
+	ActRegister       = "register"
+	ActUnregister     = "unregister"
 )
 
 // Service owns the state of every agent this computer's member manages.
@@ -189,7 +192,7 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) CheckAll(ctx context.Context) {
 	for i := range s.cat().Agents {
 		e := &s.cat().Agents[i]
-		if e.RunsHere() && e.Package() != "" {
+		if e.RunsHere() && e.packageIn(s.checkPlacement(e)) != "" {
 			if err := s.check(ctx, e); err != nil {
 				log.Printf("agent-manager: check %s: %v", e.ID, err)
 			}
@@ -209,7 +212,7 @@ func (s *Service) autoUpdate() {
 	}
 	for i := range s.cat().Agents {
 		e := &s.cat().Agents[i]
-		if e.Sandbox != nil {
+		if s.placementOf(e.ID) == PlaceSandbox {
 			continue // a conversation resumes with the new version: only on a click
 		}
 		v := s.agentView(e)
@@ -294,7 +297,7 @@ func (s *Service) begin(e *Entry, action string) (context.Context, *operation, e
 }
 
 func (s *Service) beginIn(parent context.Context, e *Entry, action string) (context.Context, *operation, error) {
-	if !slices.Contains([]string{ActInstall, ActUpdate, ActRollback, ActRemove, ActCheck, ActRegister, ActUnregister}, action) {
+	if !slices.Contains([]string{ActInstall, ActInstallSandbox, ActUpdate, ActRollback, ActRemove, ActCheck, ActRegister, ActUnregister}, action) {
 		return nil, nil, fmt.Errorf("unknown action %q", action)
 	}
 	s.mu.Lock()
@@ -360,7 +363,7 @@ func (s *Service) gate(e *Entry) error {
 
 func (s *Service) perform(ctx context.Context, op *operation, e *Entry, action string) error {
 	if action == ActCheck {
-		if e.Package() == "" {
+		if e.packageIn(s.checkPlacement(e)) == "" {
 			return fmt.Errorf("%s has no place to look for a newer version", e.Name)
 		}
 		return s.check(ctx, e)
@@ -373,6 +376,8 @@ func (s *Service) perform(ctx context.Context, op *operation, e *Entry, action s
 	switch action {
 	case ActInstall:
 		return s.doInstall(ctx, op, e)
+	case ActInstallSandbox:
+		return s.installInSandbox(ctx, op, e)
 	case ActUpdate:
 		return s.doUpdate(ctx, op, e)
 	case ActRollback:
@@ -389,17 +394,34 @@ func (s *Service) perform(ctx context.Context, op *operation, e *Entry, action s
 // pin, else the newest the registry offers (after the hold); "" for an agent
 // that has no registry and updates itself.
 func (s *Service) target(ctx context.Context, e *Entry) (string, error) {
+	return s.targetIn(ctx, e, s.checkPlacement(e))
+}
+
+// checkPlacement is the placement a look for a newer version is about: where
+// the manager's install lives, else this computer (the sandbox only once chosen).
+func (s *Service) checkPlacement(e *Entry) string {
+	if p := s.placementOf(e.ID); p != "" {
+		return p
+	}
+	if e.Package() == "" && e.Sandbox != nil {
+		return PlaceSandbox
+	}
+	return PlaceHost
+}
+
+func (s *Service) targetIn(ctx context.Context, e *Entry, placement string) (string, error) {
 	s.mu.Lock()
 	pin, hold := s.Settings.Pinned[e.ID], s.Settings.HoldDays
 	s.mu.Unlock()
 	if pin != "" {
 		return pin, nil
 	}
-	if e.Package() == "" {
+	pkg := e.packageIn(placement)
+	if pkg == "" {
 		// An agent with no registry (it updates itself) has no target to name.
 		return "", nil
 	}
-	v, err := s.latestFromRegistry(ctx, e.Package(), hold)
+	v, err := s.latestFromRegistry(ctx, pkg, hold)
 	if err != nil {
 		return "", err
 	}
@@ -440,9 +462,6 @@ func (s *Service) managedVersion(id string) (cur, prev string) {
 }
 
 func (s *Service) doInstall(ctx context.Context, op *operation, e *Entry) error {
-	if e.Sandbox != nil {
-		return s.installInSandbox(ctx, op, e)
-	}
 	if e.Install == nil && e.InstallRun != nil {
 		return s.runInstaller(ctx, op, e)
 	}
@@ -453,7 +472,13 @@ func (s *Service) doInstall(ctx context.Context, op *operation, e *Entry) error 
 		return errors.New("the manager does not install " + e.Name)
 	}
 	if cur, _ := s.managedVersion(e.ID); cur != "" {
+		if s.placementOf(e.ID) == PlaceSandbox {
+			return fmt.Errorf("%s %s is already installed in your sandbox; remove it first to put it on this computer", e.Name, cur)
+		}
 		return fmt.Errorf("%s %s is already installed; use update", e.Name, cur)
+	}
+	if s.sandboxOnly(e.ID) {
+		return fmt.Errorf("your organization installs %s only in the sandbox", e.Name)
 	}
 	v, err := s.target(ctx, e)
 	if err != nil {
@@ -510,7 +535,7 @@ func (s *Service) updateManaged(ctx context.Context, op *operation, e *Entry, cu
 		op.logf("%s is already at %s", e.Name, cur)
 		return nil
 	}
-	if e.Sandbox != nil {
+	if s.placementOf(e.ID) == PlaceSandbox {
 		return s.updateInSandbox(ctx, op, e, cur, v)
 	}
 	if e.Install == nil {
@@ -621,7 +646,7 @@ func (s *Service) doRemove(op *operation, e *Entry) error {
 	if cur == "" {
 		return errors.New("the manager did not install this agent and does not remove it")
 	}
-	if e.Sandbox != nil {
+	if s.placementOf(e.ID) == PlaceSandbox {
 		if s.heldInSandbox(e) {
 			return fmt.Errorf("a room may still be running %s: removing it now would end that conversation. Remove it when no room uses it (the app restarting ends them)", e.Name)
 		}
@@ -629,6 +654,7 @@ func (s *Service) doRemove(op *operation, e *Entry) error {
 		return fmt.Errorf("a room is still running %s %s: removing it now would end that conversation. A room keeps its agent until the app restarts, so remove it then", e.Name, strings.Join(held, ", "))
 	}
 	op.logf("removing %s", e.Name)
+	store := s.storeOf(e) // before the record that says where it lives is cleared
 	if err := s.mutate(func(st *State) {
 		a := s.agentStateIn(st, e.ID)
 		a.Version, a.Previous, a.Method, a.Registered = "", "", "", false
@@ -636,7 +662,7 @@ func (s *Service) doRemove(op *operation, e *Entry) error {
 	}); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(s.storeOf(e).agentDir(e.ID)); err != nil {
+	if err := os.RemoveAll(store.agentDir(e.ID)); err != nil {
 		return fmt.Errorf("some files could not be removed (an agent may be running from them); try again later: %w", err)
 	}
 	return nil

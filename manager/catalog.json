@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-26.1",
+  "version": "2026-10-27.1",
   "agents": [
     {
       "id": "claude",
@@ -181,36 +181,14 @@
           "skillsDir": ".opencode/skills"
         }
       },
-      "signIn": "Run `opencode auth login` and sign in."
-    },
-    {
-      "id": "opencode2",
-      "name": "OpenCode 2 (in your sandbox)",
-      "platforms": [
-        "darwin"
-      ],
+      "signIn": "Run `opencode auth login` and sign in.",
       "sandbox": {
         "package": "@opencode/cli-linux-{cpu}",
-        "bin": "bin/opencode"
-      },
-      "latest": {
-        "from": "npm",
-        "package": "@opencode/cli"
-      },
-      "detect": {
-        "command": ""
-      },
-      "register": {
-        "name": "opencode2",
-        "args": [
-          "acp"
-        ],
-        "profile": {
-          "instructionsVia": "file:AGENTS.md",
-          "skillsDir": ".opencode/skills"
-        }
-      },
-      "signIn": "It works with the free models without signing in. Signing in to a provider from the sandbox is not available yet."
+        "bin": "bin/opencode",
+        "latest": "@opencode/cli",
+        "approxMB": 225,
+        "note": "This is OpenCode 2, the new generation, which keeps its own data and never touches the OpenCode you have on this computer."
+      }
     },
     {
       "id": "qwen",

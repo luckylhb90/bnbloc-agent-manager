@@ -53,7 +53,7 @@ async function act(id, action) {
 
 function chip(a) {
   const op = a.op;
-  if (op && op.running) return h("span", { class: "chip busy" }, { install: "Installing…", update: "Updating…", check: "Checking…" }[op.kind] || "Working…");
+  if (op && op.running) return h("span", { class: "chip busy" }, { install: "Installing…", "install-sandbox": "Installing…", update: "Updating…", check: "Checking…" }[op.kind] || "Working…");
   if (a.status === "unsupported") return h("span", { class: "chip" }, "Not for this system");
   if (a.status === "blocked") return h("span", { class: "chip warn" }, "Not offered");
   if (op && op.error) return h("span", { class: "chip bad" }, "Failed");
@@ -86,10 +86,12 @@ function card(a) {
   const busy = a.op && a.op.running;
   const btns = [];
   const add = (label, action, primary) => btns.push(h("button", { class: primary ? "primary" : "", onclick: () => act(a.id, action) }, label));
+  const both = a.can.install && a.can.installSandbox;
   if (a.can.install) {
-    if (a.installCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id + ":install"; render(); } }, "Install"));
-    else add("Install", "install", true);
+    if (a.installCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id + ":install"; render(); } }, both ? "Install on this computer" : "Install"));
+    else add(both ? "Install on this computer" : "Install", "install", true);
   }
+  if (a.can.installSandbox) add(a.can.install ? "Install in my sandbox" : "Install", "install-sandbox", !a.can.install);
   if (a.can.update) {
     if (a.external && a.updateCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id; render(); } }, a.updateUnknown ? "Run its updater" : "Update"));
     else add("Update", "update", true);
@@ -120,8 +122,11 @@ function card(a) {
       h("button", { class: "primary", onclick: () => act(a.id, "update") }, "Run"), " ", h("button", { onclick: () => { confirming = null; render(); } }, "Cancel")));
   }
   if (a.reason && !(a.can.install || a.can.update) && a.status !== "unsupported") body.push(h("div", { class: "hint" }, a.reason));
-  if (a.sandbox && a.status === "absent" && a.can.install) body.push(h("div", { class: "hint" }, "Runs only in your sandbox: nothing of it is installed or run on this computer, and every room shares the one copy. It works with free models without signing in."));
-  if (a.status === "absent" && a.installHint) body.push(h("div", { class: "hint" }, a.installHint));
+  if (a.sandboxOffer && a.can.installSandbox) {
+    const o = a.sandboxOffer;
+    body.push(h("div", { class: "hint" }, "In your sandbox: nothing of it is installed or run on this computer, and every room shares the one copy" + (o.approxMB ? " (about " + o.approxMB + " MB)" : "") + ". It works with free models without signing in; signing in to a provider from the sandbox is not available yet. " + (o.note || "")));
+  }
+  if (a.status === "absent" && a.installHint && !a.can.installSandbox) body.push(h("div", { class: "hint" }, a.installHint));
   if (a.status === "installed" && a.signIn && a.managed && !busy) body.push(h("div", { class: "hint" }, a.signIn));
   if (actionError[a.id]) body.push(h("div", { class: "err" }, actionError[a.id]));
   if (a.op && a.op.error && !busy) body.push(h("div", { class: "err" }, a.op.error));

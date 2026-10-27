@@ -106,6 +106,9 @@ func newSandboxRegistry(t *testing.T) *sandboxRegistry {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"dist-tags": map[string]string{"latest": v}, "time": times, "versions": versions})
 			return
+		case p == "fake-agent": // the host package of an agent that can also live in the sandbox
+			json.NewEncoder(w).Encode(map[string]any{"dist-tags": map[string]string{"latest": "1.0.0"}, "time": map[string]string{"1.0.0": "2026-01-01T00:00:00Z"}, "versions": map[string]any{"1.0.0": map[string]any{}}})
+			return
 		case strings.HasPrefix(p, "sbx-linux-"):
 			name, version := path.Dir(p), path.Base(p)
 			if b, ok := r.tarballs[version]; ok {
@@ -158,7 +161,7 @@ func TestASandboxAgentIsUnpackedIntoItsOwnFolderAndGivenToRoomsAsAPerSpaceMount(
 	reg := newSandboxRegistry(t)
 	reg.publish(t, "1.0.0")
 	svc := sandboxService(t, reg)
-	if err := do(t, svc, "sbx", ActInstall); err != nil {
+	if err := do(t, svc, "sbx", ActInstallSandbox); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.WriteRegistration(); err != nil {
@@ -207,7 +210,7 @@ func TestASandboxAgentIsOfferedOnlyWhereTheDesktopGaveItTheSandboxFolders(t *tes
 	if v.Can.Install || !strings.Contains(v.Reason, "sandbox") {
 		t.Errorf("without the sandbox's folders: can install %v, reason %q", v.Can.Install, v.Reason)
 	}
-	if err := do(t, svc, "sbx", ActInstall); err == nil {
+	if err := do(t, svc, "sbx", ActInstallSandbox); err == nil {
 		t.Error("an install without the sandbox's folders must fail, not fall back to this computer")
 	}
 	if _, err := os.Stat(svc.Store.agentDir("sbx")); err == nil {
@@ -220,7 +223,7 @@ func TestADownloadThatIsNotWhatTheRegistryHashedInstallsNothing(t *testing.T) {
 	reg.publish(t, "1.0.0")
 	reg.claim["1.0.0"] = "sha512-" + base64.StdEncoding.EncodeToString(make([]byte, 64))
 	svc := sandboxService(t, reg)
-	err := do(t, svc, "sbx", ActInstall)
+	err := do(t, svc, "sbx", ActInstallSandbox)
 	if err == nil || !strings.Contains(err.Error(), "integrity") {
 		t.Fatalf("a tampered download: %v", err)
 	}
@@ -231,7 +234,7 @@ func TestADownloadThatIsNotWhatTheRegistryHashedInstallsNothing(t *testing.T) {
 		t.Error("and records nothing")
 	}
 	reg.claim["1.0.0"] = "sha1-abc"
-	if err := do(t, svc, "sbx", ActInstall); err == nil || !strings.Contains(err.Error(), "sha512") {
+	if err := do(t, svc, "sbx", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "sha512") {
 		t.Errorf("a registry that gives no sha512 hash gives nothing to check against: %v", err)
 	}
 }
@@ -252,7 +255,7 @@ func TestAPackageThatWritesOutsideItsFolderOrIsNotWhatWasAskedForIsRefused(t *te
 		reg := newSandboxRegistry(t)
 		reg.tarballs["1.0.0"] = packageTarball(t, files...)
 		svc := sandboxService(t, reg)
-		if err := do(t, svc, "sbx", ActInstall); err == nil {
+		if err := do(t, svc, "sbx", ActInstallSandbox); err == nil {
 			t.Errorf("%s: installed", name)
 		}
 		if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("sbx")); len(entries) != 0 {
@@ -271,7 +274,7 @@ func TestASandboxAgentUpdatesBesideTheOldVersionAndRollsBack(t *testing.T) {
 	reg := newSandboxRegistry(t)
 	reg.publish(t, "1.0.0")
 	svc := sandboxService(t, reg)
-	if err := do(t, svc, "sbx", ActInstall); err != nil {
+	if err := do(t, svc, "sbx", ActInstallSandbox); err != nil {
 		t.Fatal(err)
 	}
 	reg.publish(t, "1.1.0")
@@ -315,7 +318,7 @@ func TestASandboxAgentIsNotRemovedFromUnderARoomThatRunsIt(t *testing.T) {
 	reg := newSandboxRegistry(t)
 	reg.publish(t, "1.0.0")
 	svc := sandboxService(t, reg)
-	if err := do(t, svc, "sbx", ActInstall); err != nil {
+	if err := do(t, svc, "sbx", ActInstallSandbox); err != nil {
 		t.Fatal(err)
 	}
 	// No word from the core: its sessions cannot be seen.
@@ -346,12 +349,10 @@ func TestASandboxAgentIsNotRemovedFromUnderARoomThatRunsIt(t *testing.T) {
 	}
 }
 
-func TestACatalogEntryForTheSandboxCannotAlsoRunOnThisComputer(t *testing.T) {
+func TestACatalogEntryForTheSandboxIsValidatedLikeAnyOther(t *testing.T) {
 	bad := map[string]string{
 		"an install too":    `{"id":"a","name":"A","sandbox":{"package":"p-{cpu}","bin":"bin/x"},"install":{"method":"npm","package":"p","bin":"x"},"latest":{"from":"npm","package":"p"},"register":{"name":"a"}}`,
-		"a detect":          `{"id":"a","name":"A","sandbox":{"package":"p-{cpu}","bin":"bin/x"},"latest":{"from":"npm","package":"p"},"detect":{"command":"a"},"register":{"name":"a"}}`,
 		"no register":       `{"id":"a","name":"A","sandbox":{"package":"p-{cpu}","bin":"bin/x"},"latest":{"from":"npm","package":"p"}}`,
-		"an environment":    `{"id":"a","name":"A","sandbox":{"package":"p-{cpu}","bin":"bin/x"},"latest":{"from":"npm","package":"p"},"register":{"name":"a","env":{"K":"v"}}}`,
 		"a path that exits": `{"id":"a","name":"A","sandbox":{"package":"p-{cpu}","bin":"../x"},"latest":{"from":"npm","package":"p"},"register":{"name":"a"}}`,
 		"no version source": `{"id":"a","name":"A","sandbox":{"package":"p-{cpu}","bin":"bin/x"},"register":{"name":"a"}}`,
 		"a bad package":     `{"id":"a","name":"A","sandbox":{"package":"P Q","bin":"bin/x"},"latest":{"from":"npm","package":"p"},"register":{"name":"a"}}`,
@@ -360,5 +361,142 @@ func TestACatalogEntryForTheSandboxCannotAlsoRunOnThisComputer(t *testing.T) {
 		if _, err := ParseCatalog([]byte(`{"version":"x","agents":[` + entry + `]}`)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// An agent the member may put on this computer or in the sandbox: one row, the
+// choice made when installing, recorded, and followed by everything after.
+const bothCatalog = `{
+  "version": "b1",
+  "agents": [
+    {"id": "fake", "name": "Fake Agent",
+     "install": {"method": "npm", "package": "fake-agent", "bin": "fakeagent"},
+     "sandbox": {"package": "sbx-linux-{cpu}", "bin": "bin/tool", "latest": "sbx", "approxMB": 7, "note": "the new generation"},
+     "latest": {"from": "npm"},
+     "detect": {"command": "fakeagent", "args": ["--version"]},
+     "register": {"name": "fake", "args": ["acp"]}}
+  ]
+}`
+
+func bothService(t *testing.T, reg *sandboxRegistry) *Service {
+	t.Helper()
+	svc := sandboxService(t, reg)
+	cat, err := ParseCatalog([]byte(bothCatalog))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Catalog = cat
+	svc.eff.Store(nil)
+	return svc
+}
+
+func TestTheMemberChoosesWhereAnAgentIsInstalledAndTheChoiceIsFollowed(t *testing.T) {
+	fakeNPM(t)
+	reg := newSandboxRegistry(t)
+	reg.publish(t, "2.0.0")
+	svc := bothService(t, reg)
+
+	v := view(svc, "fake")
+	if !v.Can.Install || !v.Can.InstallSandbox || v.SandboxOffer == nil || v.SandboxOffer.ApproxMB != 7 || v.SandboxOffer.Note != "the new generation" {
+		t.Fatalf("both places are offered, with what the sandbox one is: %+v", v)
+	}
+
+	// The sandbox.
+	if err := do(t, svc, "fake", ActInstallSandbox); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.placementOf("fake"); got != PlaceSandbox {
+		t.Fatalf("placement %q", got)
+	}
+	v = view(svc, "fake")
+	if !v.Sandbox || v.Can.Install || v.Can.InstallSandbox || v.Managed == nil || v.Managed.Version != "2.0.0" {
+		t.Errorf("once installed in the sandbox, neither install is offered: %+v", v)
+	}
+	if d, ok := readDropIn(t, svc); !ok || len(d.Agents) != 1 || d.Agents[0].Command != "$BNBLOC_MOUNT_AGENT_FAKE/bin/tool" {
+		t.Errorf("rooms get the guest agent: %+v", d)
+	}
+	// Installing on this computer too is refused, naming where it is.
+	if err := do(t, svc, "fake", ActInstall); err == nil || !strings.Contains(err.Error(), "in your sandbox") {
+		t.Errorf("a second place: %v", err)
+	}
+	// It moves by removing it and installing again: the files go, the mount goes,
+	// and the host install that follows is registered as a host command.
+	writeInUse(t, svc, time.Now(), true) // the core has said no room runs it
+	if err := do(t, svc, "fake", ActRemove); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(svc.sandboxStore().agentDir("fake")); err == nil {
+		t.Error("the sandbox copy is removed from the sandbox's folder")
+	}
+	if ms := readMounts(t, svc); len(ms) != 0 {
+		t.Errorf("mounts after the remove: %+v", ms)
+	}
+	if err := do(t, svc, "fake", ActInstall); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.placementOf("fake"); got != PlaceHost {
+		t.Fatalf("placement %q", got)
+	}
+	d, _ := readDropIn(t, svc)
+	raw, _ := os.ReadFile(filepath.Join(svc.ACPHome, DropInDir, DropInFile))
+	if len(d.Agents) != 1 || strings.Contains(d.Agents[0].Command, "BNBLOC_MOUNT") || strings.Contains(string(raw), `"sandbox"`) {
+		t.Errorf("a host install is a host command: %s", raw)
+	}
+	if err := do(t, svc, "fake", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "on this computer") {
+		t.Errorf("a second place: %v", err)
+	}
+	if ms := readMounts(t, svc); len(ms) != 0 {
+		t.Errorf("a host install gives the sandbox nothing: %+v", ms)
+	}
+}
+
+func TestAnOrganizationCanOfferAnAgentOnlyInTheSandbox(t *testing.T) {
+	fakeNPM(t)
+	reg := newSandboxRegistry(t)
+	reg.publish(t, "2.0.0")
+	svc := bothService(t, reg)
+	svc.Settings.SandboxOnly = map[string]bool{"fake": true}
+	v := view(svc, "fake")
+	if v.Can.Install || !v.Can.InstallSandbox || !v.SandboxOffer.Only || !strings.Contains(v.Reason, "only in the sandbox") {
+		t.Fatalf("only the sandbox is offered: %+v", v)
+	}
+	if err := do(t, svc, "fake", ActInstall); err == nil || !strings.Contains(err.Error(), "only in the sandbox") {
+		t.Errorf("the host install is refused, not just hidden: %v", err)
+	}
+	if err := do(t, svc, "fake", ActInstallSandbox); err != nil {
+		t.Errorf("the sandbox install works: %v", err)
+	}
+}
+
+func TestSandboxOnlyNamesOnlyAgentsThatCanLiveInTheSandbox(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	os.WriteFile(path, []byte(`{"sandboxOnly":["fake","ext","nobody"]}`), 0o600)
+	cat, _ := ParseCatalog([]byte(`{"version":"x","agents":[
+	  {"id":"fake","name":"F","install":{"method":"npm","package":"f","bin":"f"},"sandbox":{"package":"f-{cpu}","bin":"bin/f"},"latest":{"from":"npm"},"detect":{"command":"f"},"register":{"name":"fake"}},
+	  {"id":"ext","name":"E","detect":{"command":"e"}}]}`))
+	set, _, err := ReadSettings(path, cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !set.SandboxOnly["fake"] || set.SandboxOnly["ext"] || set.SandboxOnly["nobody"] || len(set.Notes) != 2 {
+		t.Errorf("sandboxOnly %v notes %v", set.SandboxOnly, set.Notes)
+	}
+}
+
+func TestTheNewestVersionIsLookedForWhereTheAgentLives(t *testing.T) {
+	fakeNPM(t)
+	reg := newSandboxRegistry(t)
+	reg.publish(t, "2.0.0")
+	svc := bothService(t, reg)
+	if err := do(t, svc, "fake", ActInstallSandbox); err != nil {
+		t.Fatal(err)
+	}
+	reg.publish(t, "2.1.0")
+	if err := do(t, svc, "fake", ActCheck); err != nil {
+		t.Fatal(err)
+	}
+	if v := view(svc, "fake"); !v.UpdateAvailable || v.Target != "2.1.0" {
+		t.Errorf("the sandbox install is checked against the sandbox's package (the host one is not even in this registry): %+v", v)
 	}
 }

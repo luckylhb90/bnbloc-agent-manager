@@ -35,14 +35,24 @@ type Managed struct {
 	Held []string `json:"held,omitempty"`
 }
 
+// SandboxOfferView is what the page shows beside "Install in my sandbox".
+type SandboxOfferView struct {
+	ApproxMB int    `json:"approxMB,omitempty"`
+	Note     string `json:"note,omitempty"`
+	// Only: the organization offers this agent only in the sandbox.
+	Only bool `json:"only,omitempty"`
+}
+
 // Can lists what the page may offer for the row.
 type Can struct {
-	Install    bool `json:"install"`
-	Update     bool `json:"update"`
-	Rollback   bool `json:"rollback"`
-	Remove     bool `json:"remove"`
-	Register   bool `json:"register"`
-	Unregister bool `json:"unregister"`
+	Install bool `json:"install"`
+	// InstallSandbox: put it in the sandbox instead of on this computer.
+	InstallSandbox bool `json:"installSandbox"`
+	Update         bool `json:"update"`
+	Rollback       bool `json:"rollback"`
+	Remove         bool `json:"remove"`
+	Register       bool `json:"register"`
+	Unregister     bool `json:"unregister"`
 }
 
 // AgentView is one row.
@@ -82,9 +92,10 @@ type AgentView struct {
 	Can        Can    `json:"can"`
 	Registered bool   `json:"registered"`
 	HasACP     bool   `json:"hasACP"`
-	// Sandbox: the agent lives only in the member's sandbox (nothing of it is
-	// installed or run on this computer).
-	Sandbox bool `json:"sandbox,omitempty"`
+	// Sandbox: the manager's install of it lives in the member's sandbox (nothing
+	// of it is on this computer). SandboxOffer is set when it can be put there.
+	Sandbox      bool              `json:"sandbox,omitempty"`
+	SandboxOffer *SandboxOfferView `json:"sandboxOffer,omitempty"`
 	// Shadowed: the member's own agents.json defines the name this row is given
 	// to rooms under, so their entry is the one rooms run, not this one.
 	Shadowed    bool    `json:"shadowed,omitempty"`
@@ -131,7 +142,14 @@ func (s *Service) agentView(e *Entry) AgentView {
 		ID: e.ID, Name: e.Name, For: e.For, Source: e.Source, Adapter: s.adapterOf(e.ID), Pinned: pin, HasACP: e.Register != nil,
 		InstallHint: e.InstallHint, SignIn: e.SignIn,
 		Latest: a.Latest, CheckedAt: a.CheckedAt, CheckError: a.CheckErr,
-		Registered: a.Registered && e.Register != nil, Sandbox: e.Sandbox != nil,
+		Registered: a.Registered && e.Register != nil, Sandbox: placementIn(&a) == PlaceSandbox,
+	}
+	sandboxOnly := false
+	if e.Sandbox != nil {
+		s.mu.Lock()
+		sandboxOnly = s.Settings.SandboxOnly[e.ID]
+		s.mu.Unlock()
+		v.SandboxOffer = &SandboxOfferView{ApproxMB: e.Sandbox.ApproxMB, Note: e.Sandbox.Note, Only: sandboxOnly}
 	}
 	if op != nil {
 		v.Op = op.view()
@@ -192,9 +210,15 @@ func (s *Service) agentView(e *Entry) AgentView {
 		}
 	}
 
-	v.Can.Install = (e.Install != nil || e.InstallRun != nil || e.Sandbox != nil && s.SandboxReady()) && !managed && v.External == nil && !busy
-	if e.Sandbox != nil && !s.SandboxReady() && !managed {
-		v.Reason = "This agent runs only in your sandbox, which needs the desktop app with the sandbox on."
+	v.Can.Install = (e.Install != nil || e.InstallRun != nil) && !managed && v.External == nil && !busy && !sandboxOnly
+	v.Can.InstallSandbox = e.Sandbox != nil && s.SandboxReady() && !managed && !busy
+	if e.Sandbox != nil && !managed && !v.Can.InstallSandbox && !busy && !s.SandboxReady() {
+		v.Reason = "Putting this agent in your sandbox needs the desktop app with the sandbox on."
+		if sandboxOnly || e.Install == nil && e.InstallRun == nil {
+			v.Reason = "This agent runs only in your sandbox, which needs the desktop app with the sandbox on."
+		}
+	} else if sandboxOnly && !managed && v.External == nil {
+		v.Reason = "Your organization installs " + e.Name + " only in the sandbox."
 	}
 	if e.InstallRun != nil && v.Can.Install {
 		v.InstallCommand = e.InstallRun.Command + " " + strings.Join(e.InstallRun.Args, " ")
@@ -214,7 +238,7 @@ func (s *Service) agentView(e *Entry) AgentView {
 	switch {
 	case busy:
 	case managed:
-		v.Can.Update = v.UpdateAvailable && (e.Install != nil || e.Sandbox != nil)
+		v.Can.Update = v.UpdateAvailable && (v.Sandbox && e.Sandbox != nil || !v.Sandbox && e.Install != nil)
 	case v.External != nil:
 		s.externalUpdate(e, &v, pin)
 	}

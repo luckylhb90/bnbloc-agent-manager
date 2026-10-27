@@ -18,6 +18,8 @@ const (
 	SettingPinned     = "pinned"     // org: id@version lines
 	SettingHoldDays   = "holdDays"   // org: a version younger than this is not offered
 	SettingAutoUpdate = "autoUpdate" // member: off | on
+	// SettingSandboxOnly: org: agent ids offered only for the sandbox.
+	SettingSandboxOnly = "sandboxOnly"
 )
 
 // Settings are the declared settings' values, checked.
@@ -26,6 +28,10 @@ type Settings struct {
 	Pinned     map[string]string
 	HoldDays   int
 	AutoUpdate bool
+	// SandboxOnly are the agents the organization offers only in the member's
+	// sandbox. It governs what the manager offers (as Allowed and Pinned do): an
+	// agent the member installs some other way is outside it.
+	SandboxOnly map[string]bool
 	// OrgAgents and MemberAgents are the lines of configured agents
 	// (config.go).
 	OrgAgents    []string
@@ -40,7 +46,7 @@ type Settings struct {
 // configure. An empty path is no settings; a file that is named but unreadable
 // is an error.
 func ReadSettings(path string, base *Catalog) (Settings, *Catalog, error) {
-	s := Settings{Pinned: map[string]string{}}
+	s := Settings{Pinned: map[string]string{}, SandboxOnly: map[string]bool{}}
 	if path == "" {
 		return s, base, nil
 	}
@@ -92,6 +98,17 @@ func ReadSettings(path string, base *Catalog) (Settings, *Catalog, error) {
 			continue
 		}
 		s.Pinned[id] = v
+	}
+	for _, line := range lines(SettingSandboxOnly) {
+		id := strings.TrimSpace(line)
+		if id == "" {
+			continue
+		}
+		if e, ok := c.Entry(id); !ok || e.Sandbox == nil {
+			s.Notes = append(s.Notes, fmt.Sprintf("sandboxOnly: %q is not an agent of this catalog that can live in the sandbox", id))
+			continue
+		}
+		s.SandboxOnly[id] = true
 	}
 	if h := str(SettingHoldDays); h != "" {
 		n, err := strconv.Atoi(h)

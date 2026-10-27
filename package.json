@@ -2,7 +2,7 @@
   "kind": "bnbloc.plugin.package/v1",
   "contract": "bnbloc.plugin.contract/v1",
   "name": "agent-manager",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "publisher": "bnbloc",
   "description": "See the coding agents on your computer, install and update them, and give them to your rooms. Nothing is installed or changed until you click.",
   "runtime": "sidecar",
@@ -39,6 +39,13 @@
       "type": "lines",
       "scope": "org",
       "help": "One <agent id>@<version> per line (such as gemini@0.65.0). A pinned agent is offered and installed at that version only; an install that cannot be set to a chosen version gets no update."
+    },
+    {
+      "key": "sandboxOnly",
+      "label": "Agents offered only in the sandbox",
+      "type": "lines",
+      "scope": "org",
+      "help": "Agent ids members may install only in their sandbox, one per line (such as opencode). Others offer both places."
     },
     {
       "key": "holdDays",

@@ -234,16 +234,16 @@ func (e *Entry) validate() error {
 	if strings.TrimSpace(e.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
+	if e.Detect.Command == "" && (e.Sandbox == nil || e.Install != nil || len(e.Found) > 0) {
+		return fmt.Errorf("detect.command must be a bare command name")
+	}
+	if e.Detect.Command != "" && strings.ContainsAny(e.Detect.Command, `/\ `) {
+		return fmt.Errorf("detect.command must be a bare command name")
+	}
 	if e.Sandbox != nil {
-		// Nothing of a sandbox agent is on this computer to look for.
-		if e.Detect.Command != "" {
-			return fmt.Errorf("a sandbox agent has no detect: none of it is on this computer")
-		}
 		if err := e.Sandbox.validate(e); err != nil {
 			return err
 		}
-	} else if e.Detect.Command == "" || strings.ContainsAny(e.Detect.Command, `/\ `) {
-		return fmt.Errorf("detect.command must be a bare command name")
 	}
 	if e.Detect.Parse != "" {
 		re, err := regexp.Compile(e.Detect.Parse)

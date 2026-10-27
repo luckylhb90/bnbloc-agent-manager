@@ -48,8 +48,8 @@ func (s *Service) registration() dropIn {
 		if e.Register == nil || a == nil || !a.Registered || !e.RunsHere() || !set.Allows(e.ID) {
 			continue
 		}
-		if e.Sandbox != nil {
-			if a.Version != "" && s.SandboxReady() {
+		if placementIn(a) == PlaceSandbox {
+			if s.SandboxReady() {
 				out.Agents = append(out.Agents, dropInEntry{Name: e.Register.Name, Command: guestCommand(e), Args: e.Register.Args, Sandbox: "guest", Profile: e.Register.Profile, Permissions: e.Register.Permissions})
 			}
 			continue

@@ -35,19 +35,26 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
   core (an older core, or none has run) nothing is removed. Remove is refused
   while a room still runs the agent. If a file is gone anyway, the core continues
   the conversation with the agent's current version and says so in its log.
-- **Agents that live only in your sandbox** (OpenCode 2 is the first): nothing of
-  them is installed or run on your computer. The manager downloads the package's
-  tarball, checks it against the registry's sha512, unpacks it (no npm, none of
-  the package's scripts) into a folder of its own under the workspaces root, and
-  tells the sandbox bridge about it (`bnbloc.sandbox.mounts/v1`, `perSpace`):
-  each room's sandbox gets a tree of hard links to that one copy, read-only, so
-  ten rooms cost one copy on disk (225 MB for OpenCode 2, not 465 MB per room).
-  The ACP core launches it inside the sandbox (`"sandbox": "guest"`) and never on
-  your computer. Needs the desktop app with the sandbox on. An update is a click
-  (a conversation continues with the new version), never automatic; Remove is
-  refused while a room may be running it. A catalog entry names the package for
-  the sandbox's image (`sandbox.package`, `{cpu}` is arm64 or x64; the image is
-  Debian, so glibc builds). Design:
+- **Where to install: this computer or your sandbox.** An agent whose catalog entry
+  has a `sandbox` block offers both on its row, and the choice is made when you
+  install it: *Install on this computer* or *Install in my sandbox* (with its size
+  and what differs). Nothing of a sandbox install is installed or run on your
+  computer: the manager downloads the package's tarball, checks it against the
+  registry's sha512, unpacks it (no npm, none of the package's scripts) into a
+  folder of its own under the workspaces root, and tells the sandbox bridge
+  (`bnbloc.sandbox.mounts/v1`, `perSpace`): each room's sandbox gets a tree of hard
+  links to that one copy, read-only, so ten rooms cost one copy on disk (225 MB
+  for OpenCode 2). The ACP core launches it inside the sandbox (`"sandbox":
+  "guest"`) and never on your computer. The choice is recorded; moving an agent is
+  Remove, then Install in the other place. An update in the sandbox is a click (a
+  conversation continues with the new version), never automatic; Remove is refused
+  while a room may be running it. An organization can offer an agent only in the
+  sandbox (`sandboxOnly`). It needs the desktop app with the sandbox on. The
+  entry names the package for the sandbox's image (`sandbox.package`, `{cpu}` is
+  arm64 or x64; the image is Debian, so glibc builds) and, when the newest
+  generation ships under another name, `sandbox.latest`. Only self-contained
+  packages work (a program with its files); an agent that needs `npm install` of
+  its dependencies is not offered the sandbox yet. Design:
   [`docs/prd/2026-10-26-sandbox-only-agents-design.md`](https://github.com/luckylhb90/bnbloc/blob/main/docs/prd/2026-10-26-sandbox-only-agents-design.md).
 - **Update** installs the new version beside the old, checks it, then switches
   the registration. **Roll back** switches it back (the previous version is
