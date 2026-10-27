@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -501,5 +502,146 @@ func TestTheNewestVersionIsLookedForWhereTheAgentLives(t *testing.T) {
 	}
 	if v := view(svc, "fake"); !v.UpdateAvailable || v.Target != "2.1.0" {
 		t.Errorf("the sandbox install is checked against the sandbox's package (the host one is not even in this registry): %+v", v)
+	}
+}
+
+// An agent that is a package with dependencies: this computer's npm installs it
+// for the guest's platform, never running a script, and rooms run it with the
+// guest's node.
+const npmSandboxCatalog = `{
+  "version": "n1",
+  "agents": [
+    {"id": "dep", "name": "Dep Agent",
+     "install": {"method": "npm", "package": "dep-agent", "bin": "depagent"},
+     "sandbox": {"method": "npm", "bin": "depagent", "approxMB": 100},
+     "latest": {"from": "npm"},
+     "detect": {"command": "depagent", "args": ["--version"]},
+     "register": {"name": "dep", "args": ["--acp"]}}
+  ]
+}`
+
+// fakeCrossNPM is an npm that records its arguments and installs the package
+// the way npm does: node_modules/<pkg>/package.json and a .bin link.
+func fakeCrossNPM(t *testing.T, version string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake npm is a shell script")
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "args.log")
+	script := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "` + version + `"; exit 0; fi
+echo "$@" >> '` + log + `'
+prefix=""; last=""
+while [ $# -gt 0 ]; do
+  case "$1" in --prefix) prefix="$2"; shift;; esac
+  last="$1"; shift
+done
+pkg="${last%@*}"; ver="${last##*@}"
+mkdir -p "$prefix/node_modules/$pkg" "$prefix/node_modules/.bin"
+printf '{"name":"%s","version":"%s"}' "$pkg" "$ver" > "$prefix/node_modules/$pkg/package.json"
+printf '#!/usr/bin/env node\nconsole.log("x")\n' > "$prefix/node_modules/$pkg/cli.js"
+chmod 600 "$prefix/node_modules/$pkg/cli.js"
+ln -s "../$pkg/cli.js" "$prefix/node_modules/.bin/depagent"
+chmod 700 "$prefix/node_modules/$pkg"
+`
+	if err := os.WriteFile(filepath.Join(dir, "npm"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+func npmSandboxService(t *testing.T) *Service {
+	t.Helper()
+	reg := newSandboxRegistry(t)
+	svc := sandboxService(t, reg)
+	cat, err := ParseCatalog([]byte(npmSandboxCatalog))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Catalog = cat
+	svc.eff.Store(nil)
+	return svc
+}
+
+func TestAnAgentWithDependenciesIsInstalledForTheGuestsPlatformWithoutRunningAScript(t *testing.T) {
+	log := fakeCrossNPM(t, "11.9.0")
+	svc := npmSandboxService(t)
+	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"} // the registry here has no such package; the pin names the version
+	if err := do(t, svc, "dep", ActInstallSandbox); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(log)
+	for _, want := range []string{"--os=linux", "--cpu=" + npmCPU(), "--libc=glibc", "--ignore-scripts", "dep-agent@3.1.4"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("npm was run as %q, want %s", strings.TrimSpace(string(raw)), want)
+		}
+	}
+	dir := svc.sandboxStore().versionDir("dep", "3.1.4")
+	if fi, err := os.Stat(filepath.Join(dir, "node_modules", "dep-agent", "cli.js")); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Errorf("a file the guest's user must read is 0644 (npm left 0600): %v %v", fi, err)
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, "node_modules", "dep-agent")); fi == nil || fi.Mode().Perm() != 0o755 {
+		t.Errorf("a folder the guest's user must list is 0755 (npm left 0700): %v", fi)
+	}
+	if got, err := os.Readlink(filepath.Join(dir, "node_modules", ".bin", "depagent")); err != nil || got != "../dep-agent/cli.js" {
+		t.Errorf("the command link is kept as npm made it: %q %v", got, err)
+	}
+	_ = svc.WriteRegistration()
+	d, _ := readDropIn(t, svc)
+	if len(d.Agents) != 1 || d.Agents[0].Command != "$BNBLOC_MOUNT_AGENT_DEP/node_modules/.bin/depagent" || strings.Join(d.Agents[0].Args, " ") != "--acp" {
+		t.Errorf("rooms launch it through the guest's node_modules/.bin: %+v", d)
+	}
+	if ms := readMounts(t, svc); len(ms) != 1 || ms[0].Host != dir {
+		t.Errorf("mounts %+v", ms)
+	}
+}
+
+func TestAnOldNpmThatWouldInstallThisComputersPlatformIsRefused(t *testing.T) {
+	log := fakeCrossNPM(t, "10.2.0")
+	svc := npmSandboxService(t)
+	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
+	err := do(t, svc, "dep", ActInstallSandbox)
+	if err == nil || !strings.Contains(err.Error(), "npm 10.5.0 or newer") {
+		t.Fatalf("an npm without --libc: %v", err)
+	}
+	if raw, _ := os.ReadFile(log); len(raw) != 0 {
+		t.Errorf("npm installed nothing, but ran: %s", raw)
+	}
+}
+
+func TestAPackageThatNamesAnotherVersionOrNoCommandIsNotInstalled(t *testing.T) {
+	fakeCrossNPM(t, "11.9.0")
+	svc := npmSandboxService(t)
+	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
+	svc.Catalog.Agents[0].Sandbox.Bin = "nosuchcommand"
+	svc.eff.Store(nil)
+	if err := do(t, svc, "dep", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "nosuchcommand") {
+		t.Fatalf("a missing command: %v", err)
+	}
+	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep")); len(entries) != 0 {
+		t.Errorf("a failed install leaves nothing behind: %v", entries)
+	}
+}
+
+func TestAnAgentThatNeedsASignInTheSandboxCannotDoIsShownDisabledWithWhy(t *testing.T) {
+	fakeCrossNPM(t, "11.9.0")
+	svc := npmSandboxService(t)
+	svc.Catalog.Agents[0].Sandbox.SignIn = "needed"
+	svc.eff.Store(nil)
+	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
+	v := view(svc, "dep")
+	if v.Can.InstallSandbox || v.SandboxOffer == nil || !v.SandboxOffer.NeedsSignIn || !v.Can.Install {
+		t.Fatalf("the sandbox choice is disabled and says why, the host install stays: %+v offer %+v", v.Can, v.SandboxOffer)
+	}
+	if err := do(t, svc, "dep", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "sign in") {
+		t.Errorf("refused, not just hidden: %v", err)
+	}
+	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep")); len(entries) != 0 {
+		t.Errorf("nothing was installed: %v", entries)
+	}
+	if _, err := ParseCatalog([]byte(`{"version":"x","agents":[{"id":"a","name":"A","install":{"method":"npm","package":"a","bin":"a"},"sandbox":{"method":"npm","bin":"a","signIn":"sometimes"},"latest":{"from":"npm"},"detect":{"command":"a"},"register":{"name":"a"}}]}`)); err == nil {
+		t.Error("an unknown signIn value is refused")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -34,10 +35,18 @@ import (
 
 // SandboxInstall is how an agent is made available in the sandbox.
 type SandboxInstall struct {
-	// Package is the npm package whose tarball holds the agent's files for the
-	// guest; {cpu} is the guest's architecture (arm64 or x64).
-	Package string `json:"package"`
-	// Bin is the agent's program inside the tarball (below its root).
+	// Method is "tarball" (the default): the package is a platform package that
+	// holds the agent's program, unpacked as it is; or "npm": the agent is a
+	// package with dependencies, installed by this computer's npm for the guest's
+	// platform (--os=linux --cpu=<guest> --libc=glibc, never a script) and run by
+	// the guest's own node.
+	Method string `json:"method,omitempty"`
+	// Package is, for "tarball", the npm package whose tarball holds the agent's
+	// files for the guest ({cpu} is the guest's architecture, arm64 or x64); for
+	// "npm", the package to install (the entry's install.package when empty).
+	Package string `json:"package,omitempty"`
+	// Bin is, for "tarball", the agent's program inside the tarball; for "npm",
+	// its command name in node_modules/.bin.
 	Bin string `json:"bin"`
 	// Latest is the npm package the newest sandbox version is read from, when
 	// it is not the entry's own (an agent whose newest generation ships under
@@ -48,21 +57,66 @@ type SandboxInstall struct {
 	// Note says what differs from installing on this computer (shown on the
 	// choice).
 	Note string `json:"note,omitempty"`
+	// SignIn is "needed" when the agent cannot work without the member signing in
+	// to its provider and the sandbox has no way to do it yet (a login is a
+	// terminal or browser flow; design §5). The choice is then shown disabled with
+	// that reason, never hidden, and the agent still installs on this computer.
+	// Empty: it works without signing in (free models).
+	SignIn string `json:"signIn,omitempty"`
 }
 
 var sandboxBinRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
 
-func (in *SandboxInstall) validate(e *Entry) error {
-	if !packageRE.MatchString(strings.ReplaceAll(in.Package, "{cpu}", "arm64")) {
-		return fmt.Errorf("sandbox.package %q is not an npm package name", in.Package)
+// Sandbox install methods.
+const (
+	sandboxTarball = "tarball"
+	sandboxNPM     = "npm"
+)
+
+func (in *SandboxInstall) method() string {
+	if in.Method == "" {
+		return sandboxTarball
 	}
-	if !sandboxBinRE.MatchString(in.Bin) {
-		return fmt.Errorf("sandbox.bin %q is not a path inside the package", in.Bin)
+	return in.Method
+}
+
+// packageName is the package the method installs.
+func (in *SandboxInstall) packageName(e *Entry) string {
+	if in.method() == sandboxNPM && in.Package == "" && e.Install != nil {
+		return e.Install.Package
+	}
+	return in.guestPackage()
+}
+
+func (in *SandboxInstall) validate(e *Entry) error {
+	switch in.method() {
+	case sandboxTarball:
+		if !packageRE.MatchString(strings.ReplaceAll(in.Package, "{cpu}", "arm64")) {
+			return fmt.Errorf("sandbox.package %q is not an npm package name", in.Package)
+		}
+		if !sandboxBinRE.MatchString(in.Bin) {
+			return fmt.Errorf("sandbox.bin %q is not a path inside the package", in.Bin)
+		}
+	case sandboxNPM:
+		if in.Package == "" && e.Install == nil {
+			return errors.New("an npm sandbox install needs sandbox.package or install.package")
+		}
+		if in.Package != "" && !packageRE.MatchString(in.Package) {
+			return fmt.Errorf("sandbox.package %q is not an npm package name", in.Package)
+		}
+		if !binRE.MatchString(in.Bin) {
+			return fmt.Errorf("sandbox.bin %q is not a command name", in.Bin)
+		}
+	default:
+		return fmt.Errorf("sandbox.method %q is not tarball or npm", in.Method)
+	}
+	if in.SignIn != "" && in.SignIn != "needed" {
+		return fmt.Errorf("sandbox.signIn %q is not empty or needed", in.SignIn)
 	}
 	if in.Latest != "" && !packageRE.MatchString(in.Latest) {
 		return fmt.Errorf("sandbox.latest %q is not an npm package name", in.Latest)
 	}
-	if in.Latest == "" && e.Package() == "" {
+	if e.sandboxPackage() == "" {
 		return errors.New("a sandbox agent needs a package to read its version from (sandbox.latest, latest.package or install.package)")
 	}
 	if e.Register == nil {
@@ -140,6 +194,9 @@ func (e *Entry) sandboxPackage() string {
 	if e.Sandbox != nil && e.Sandbox.Latest != "" {
 		return e.Sandbox.Latest
 	}
+	if e.Sandbox != nil && e.Sandbox.method() == sandboxNPM && e.Sandbox.Package != "" {
+		return e.Sandbox.Package
+	}
 	return e.Package()
 }
 
@@ -159,7 +216,12 @@ func mountEnv(id string) string {
 
 // guestCommand is the agent's command line in the guest: the variable and the
 // program's path in the package.
-func guestCommand(e *Entry) string { return "$" + mountEnv(e.ID) + "/" + e.Sandbox.Bin }
+func guestCommand(e *Entry) string {
+	if e.Sandbox.method() == sandboxNPM {
+		return "$" + mountEnv(e.ID) + "/node_modules/.bin/" + e.Sandbox.Bin
+	}
+	return "$" + mountEnv(e.ID) + "/" + e.Sandbox.Bin
+}
 
 // sandboxLimits bound what an unpacked tarball may be.
 const (
@@ -240,6 +302,9 @@ func (s *Service) sandboxInstall(ctx context.Context, op *operation, e *Entry, v
 	}
 	if !s.SandboxReady() {
 		return errors.New("the sandbox's folders are not available to this app: use the desktop app with the sandbox on")
+	}
+	if e.Sandbox.method() == sandboxNPM {
+		return s.sandboxNPMInstall(ctx, op, e, version)
 	}
 	in := e.Sandbox
 	pkg := in.guestPackage()
@@ -520,6 +585,9 @@ func (s *Service) installInSandbox(ctx context.Context, op *operation, e *Entry)
 	if e.Sandbox == nil {
 		return fmt.Errorf("%s cannot be put in the sandbox", e.Name)
 	}
+	if e.Sandbox.SignIn == "needed" {
+		return fmt.Errorf("%s needs you to sign in to its provider, which the sandbox cannot do yet; install it on this computer instead", e.Name)
+	}
 	if cur, _ := s.managedVersion(e.ID); cur != "" {
 		where := "on this computer"
 		if s.placementOf(e.ID) == PlaceSandbox {
@@ -568,4 +636,122 @@ func (s *Service) sandboxOnly(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Settings.SandboxOnly[id]
+}
+
+// minNPMForPlatformFlags is the npm that honours --libc beside --os and --cpu:
+// an older one would quietly install this computer's own platform's files.
+const minNPMForPlatformFlags = "10.5.0"
+
+// sandboxNPMInstall installs an agent that has dependencies for the sandbox's
+// platform with this computer's npm: the package and its dependencies, the
+// optional ones of the guest's os, cpu and libc, and no script of any package
+// (--ignore-scripts, always: a script would run here with the wrong platform's
+// files). Nothing of it is executed on this computer. The result is the same
+// kind of folder a tarball install makes: published whole, never changed.
+func (s *Service) sandboxNPMInstall(ctx context.Context, op *operation, e *Entry, version string) error {
+	in := e.Sandbox
+	pkg := in.packageName(e)
+	npm, err := exec.LookPath("npm")
+	if err != nil {
+		return errors.New("npm is needed to put this agent in the sandbox and was not found. Install Node.js, then try again")
+	}
+	if out, err := exec.CommandContext(ctx, npm, "--version").Output(); err != nil || !AtLeast(strings.TrimSpace(string(out)), minNPMForPlatformFlags) {
+		return fmt.Errorf("npm %s or newer is needed to install for the sandbox's platform; update Node.js and try again", minNPMForPlatformFlags)
+	}
+	st := s.sandboxStore()
+	final := st.versionDir(e.ID, version)
+	partial := final + partialSuffix
+	_ = os.RemoveAll(partial)
+	if err := os.MkdirAll(partial, 0o755); err != nil {
+		return err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.RemoveAll(partial)
+		}
+	}()
+	args := []string{"install", "--prefix", partial, "--cache", s.Store.cacheDir(),
+		"--os=linux", "--cpu=" + npmCPU(), "--libc=glibc", "--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--loglevel=http",
+		pkg + "@" + version}
+	op.logf("installing %s %s for the sandbox's platform (linux %s)", pkg, version, npmCPU())
+	if err := s.run(ctx, op, npm, args...); err != nil {
+		return err
+	}
+	if err := checkInstalledPackage(partial, pkg, version); err != nil {
+		return err
+	}
+	if fi, err := os.Lstat(filepath.Join(partial, "node_modules", ".bin", in.Bin)); err != nil || fi.Mode()&(os.ModeSymlink|0o111) == 0 {
+		return fmt.Errorf("npm finished and %s is not in the package: the catalog's command name may be wrong", in.Bin)
+	}
+	n, err := makeReadableByGuest(partial)
+	if err != nil {
+		return err
+	}
+	if n > maxTarFiles*2 {
+		return fmt.Errorf("the install holds %d files, more than this component accepts", n)
+	}
+	op.logf("%d files", n)
+	if err := os.RemoveAll(final); err != nil {
+		return err
+	}
+	if err := os.Rename(partial, final); err != nil {
+		return err
+	}
+	ok = true
+	return nil
+}
+
+// npmCPU is the guest's architecture as npm names it.
+func npmCPU() string {
+	if runtime.GOARCH == "amd64" {
+		return "x64"
+	}
+	return runtime.GOARCH
+}
+
+// checkInstalledPackage confirms node_modules holds the package and version
+// asked for (npm cannot be run to report it: it is the guest's platform's).
+func checkInstalledPackage(dir, pkg, version string) error {
+	raw, err := os.ReadFile(filepath.Join(dir, "node_modules", filepath.FromSlash(pkg), "package.json"))
+	if err != nil {
+		return fmt.Errorf("npm finished and %s is not in node_modules", pkg)
+	}
+	var m struct{ Name, Version string }
+	if err := json.Unmarshal(raw, &m); err != nil || m.Name != pkg || m.Version != version {
+		return fmt.Errorf("the installed package says it is %s %s, not %s %s", m.Name, m.Version, pkg, version)
+	}
+	return nil
+}
+
+// makeReadableByGuest gives every file the mode the guest's user needs
+// (readable by all, runnable when it already was; folders listable) and counts
+// the entries. Links are left alone.
+func makeReadableByGuest(dir string) (int, error) {
+	n := 0
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		n++
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		mode := fs.FileMode(0o755)
+		if !d.IsDir() {
+			mode = 0o644
+			if fi.Mode().Perm()&0o111 != 0 {
+				mode = 0o755
+			}
+		}
+		if fi.Mode().Perm() != mode {
+			return os.Chmod(p, mode)
+		}
+		return nil
+	})
+	return n, err
 }

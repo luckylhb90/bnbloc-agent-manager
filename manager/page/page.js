@@ -122,6 +122,7 @@ function card(a) {
       h("button", { class: "primary", onclick: () => act(a.id, "update") }, "Run"), " ", h("button", { onclick: () => { confirming = null; render(); } }, "Cancel")));
   }
   if (a.reason && !(a.can.install || a.can.update) && a.status !== "unsupported") body.push(h("div", { class: "hint" }, a.reason));
+  if (a.sandboxOffer && a.sandboxOffer.needsSignIn) body.push(h("div", { class: "hint" }, "Putting it in your sandbox is not available yet: it works only after you sign in to its provider, and the sandbox cannot do that yet. It still installs on this computer."));
   if (a.sandboxOffer && a.can.installSandbox) {
     const o = a.sandboxOffer;
     body.push(h("div", { class: "hint" }, "In your sandbox: nothing of it is installed or run on this computer, and every room shares the one copy" + (o.approxMB ? " (about " + o.approxMB + " MB)" : "") + ". It works with free models without signing in; signing in to a provider from the sandbox is not available yet. " + (o.note || "")));

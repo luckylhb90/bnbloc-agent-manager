@@ -52,9 +52,16 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
   sandbox (`sandboxOnly`). It needs the desktop app with the sandbox on. The
   entry names the package for the sandbox's image (`sandbox.package`, `{cpu}` is
   arm64 or x64; the image is Debian, so glibc builds) and, when the newest
-  generation ships under another name, `sandbox.latest`. Only self-contained
-  packages work (a program with its files); an agent that needs `npm install` of
-  its dependencies is not offered the sandbox yet. Design:
+  generation ships under another name, `sandbox.latest`. Two methods: `tarball` (a platform package that is the
+  program, unpacked as it is) and `npm` (an agent with dependencies: this
+  computer's npm, 10.5 or newer, installs it for the guest's platform with
+  `--os=linux --cpu=<guest> --libc=glibc` and **never runs a script**, `--ignore-scripts`
+  always; the Linux files are never executed here, and rooms run them with the
+  guest's node). `sandbox.signIn: "needed"` marks an agent that works only after
+  the member signs in to its provider, which the sandbox cannot do yet: its sandbox
+  choice is shown disabled with that reason (Gemini, Qwen, Copilot, Cline, Kilo,
+  Auggie and DeepSeek Harness run in the guest, checked with an ACP `initialize`
+  there, and wait for sign-in). Design:
   [`docs/prd/2026-10-26-sandbox-only-agents-design.md`](https://github.com/luckylhb90/bnbloc/blob/main/docs/prd/2026-10-26-sandbox-only-agents-design.md).
 - **Update** installs the new version beside the old, checks it, then switches
   the registration. **Roll back** switches it back (the previous version is

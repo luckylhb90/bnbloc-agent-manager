@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-27.1",
+  "version": "2026-10-27.2",
   "agents": [
     {
       "id": "claude",
@@ -133,7 +133,13 @@
           "--acp"
         ]
       },
-      "signIn": "Run `gemini` once and sign in."
+      "signIn": "Run `gemini` once and sign in.",
+      "sandbox": {
+        "method": "npm",
+        "bin": "gemini",
+        "approxMB": 100,
+        "signIn": "needed"
+      }
     },
     {
       "id": "opencode",
@@ -221,7 +227,13 @@
           "--experimental-skills"
         ]
       },
-      "signIn": "Run `qwen` once and sign in."
+      "signIn": "Run `qwen` once and sign in.",
+      "sandbox": {
+        "method": "npm",
+        "bin": "qwen",
+        "approxMB": 286,
+        "signIn": "needed"
+      }
     },
     {
       "id": "copilot",
@@ -246,7 +258,13 @@
           "--acp"
         ]
       },
-      "signIn": "Run `copilot` once and sign in."
+      "signIn": "Run `copilot` once and sign in.",
+      "sandbox": {
+        "method": "npm",
+        "bin": "copilot",
+        "approxMB": 193,
+        "signIn": "needed"
+      }
     },
     {
       "id": "cline",
@@ -271,7 +289,13 @@
           "--acp"
         ]
       },
-      "signIn": "Run `cline` once and sign in."
+      "signIn": "Run `cline` once and sign in.",
+      "sandbox": {
+        "method": "npm",
+        "bin": "cline",
+        "approxMB": 411,
+        "signIn": "needed"
+      }
     },
     {
       "id": "kilo",
@@ -296,7 +320,13 @@
           "acp"
         ]
       },
-      "signIn": "Run `kilo` once and sign in."
+      "signIn": "Run `kilo` once and sign in.",
+      "sandbox": {
+        "method": "npm",
+        "bin": "kilo",
+        "approxMB": 322,
+        "signIn": "needed"
+      }
     },
     {
       "id": "auggie",
@@ -328,7 +358,13 @@
           "--acp"
         ]
       },
-      "signIn": "Run `auggie login`."
+      "signIn": "Run `auggie login`.",
+      "sandbox": {
+        "method": "npm",
+        "bin": "auggie",
+        "approxMB": 40,
+        "signIn": "needed"
+      }
     },
     {
       "id": "deepseek-harness",
@@ -353,6 +389,12 @@
           "--profile",
           "acp"
         ]
+      },
+      "sandbox": {
+        "method": "npm",
+        "bin": "dsh",
+        "approxMB": 852,
+        "signIn": "needed"
       }
     },
     {

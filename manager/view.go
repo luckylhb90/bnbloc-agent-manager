@@ -41,6 +41,9 @@ type SandboxOfferView struct {
 	Note     string `json:"note,omitempty"`
 	// Only: the organization offers this agent only in the sandbox.
 	Only bool `json:"only,omitempty"`
+	// NeedsSignIn: it works only after signing in to its provider, which the
+	// sandbox cannot do yet: shown disabled, with why.
+	NeedsSignIn bool `json:"needsSignIn,omitempty"`
 	// HostToo: the agent can also be installed on this computer, so the button
 	// must say where.
 	HostToo bool `json:"hostToo,omitempty"`
@@ -219,7 +222,10 @@ func (s *Service) agentView(e *Entry) AgentView {
 	}
 
 	v.Can.Install = (e.Install != nil || e.InstallRun != nil) && !managed && v.External == nil && !busy && !sandboxOnly
-	v.Can.InstallSandbox = e.Sandbox != nil && s.SandboxReady() && !managed && !busy
+	v.Can.InstallSandbox = e.Sandbox != nil && s.SandboxReady() && !managed && !busy && e.Sandbox.SignIn != "needed"
+	if e.Sandbox != nil && e.Sandbox.SignIn == "needed" && !managed && !busy {
+		v.SandboxOffer.NeedsSignIn = true
+	}
 	if e.Sandbox != nil && !managed && !v.Can.InstallSandbox && !busy && !s.SandboxReady() {
 		v.Reason = "Putting this agent in your sandbox needs the desktop app with the sandbox on."
 		if sandboxOnly || e.Install == nil && e.InstallRun == nil {
