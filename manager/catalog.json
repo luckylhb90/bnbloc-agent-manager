@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-27.2",
+  "version": "2026-10-28.1",
   "agents": [
     {
       "id": "claude",
@@ -29,7 +29,10 @@
           ]
         }
       ],
-      "signIn": "Run `claude` once and sign in."
+      "signIn": "Run `claude` once and sign in.",
+      "sandbox": {
+        "unavailable": "Claude Code signs in with your Claude account, which Anthropic allows only inside Claude Code itself. With an API key it will be offered once the sandbox can hold keys safely; until then use it on this computer."
+      }
     },
     {
       "id": "claude-acp",
@@ -78,7 +81,21 @@
           "--version"
         ]
       },
-      "signIn": "Run `codex` once and sign in."
+      "signIn": "Run `codex` once and sign in.",
+      "sandbox": {
+        "method": "npm",
+        "package": "@agentclientprotocol/codex-acp",
+        "bin": "codex-acp",
+        "approxMB": 401,
+        "signIn": "needed",
+        "register": {
+          "name": "codex",
+          "profile": {
+            "instructionsVia": "file:AGENTS.md",
+            "skillsDir": ".agents/skills"
+          }
+        }
+      }
     },
     {
       "id": "codex-acp",
@@ -189,11 +206,35 @@
       },
       "signIn": "Run `opencode auth login` and sign in.",
       "sandbox": {
+        "unavailable": "OpenCode 1.x is not offered in the sandbox. The new generation is its own agent, OpenCode 2."
+      }
+    },
+    {
+      "id": "opencode2",
+      "name": "OpenCode 2",
+      "sandbox": {
         "package": "@opencode/cli-linux-{cpu}",
         "bin": "bin/opencode",
         "latest": "@opencode/cli",
         "approxMB": 225,
-        "note": "This is OpenCode 2, the new generation, which keeps its own data and never touches the OpenCode you have on this computer."
+        "note": "It works with free models without signing in. It keeps its own data and never touches OpenCode 1.x."
+      },
+      "latest": {
+        "from": "npm",
+        "package": "@opencode/cli"
+      },
+      "detect": {
+        "command": ""
+      },
+      "register": {
+        "name": "opencode2",
+        "args": [
+          "acp"
+        ],
+        "profile": {
+          "instructionsVia": "file:AGENTS.md",
+          "skillsDir": ".opencode/skills"
+        }
       }
     },
     {
@@ -263,7 +304,7 @@
         "method": "npm",
         "bin": "copilot",
         "approxMB": 193,
-        "signIn": "needed"
+        "signIn": "login"
       }
     },
     {
@@ -294,7 +335,7 @@
         "method": "npm",
         "bin": "cline",
         "approxMB": 411,
-        "signIn": "needed"
+        "signIn": "login"
       }
     },
     {
@@ -363,7 +404,7 @@
         "method": "npm",
         "bin": "auggie",
         "approxMB": 40,
-        "signIn": "needed"
+        "signIn": "login"
       }
     },
     {
@@ -421,7 +462,10 @@
           "--version"
         ]
       },
-      "signIn": "Run `pi`, then `/login` inside it."
+      "signIn": "Run `pi`, then `/login` inside it.",
+      "sandbox": {
+        "unavailable": "pi runs through a separate ACP adapter that needs pi itself beside it, and the sandbox install does not do that yet."
+      }
     },
     {
       "id": "pi-acp",
@@ -482,7 +526,10 @@
           "acp"
         ]
       },
-      "signIn": "Run `omp login` and sign in."
+      "signIn": "Run `omp login` and sign in.",
+      "sandbox": {
+        "unavailable": "omp installs with Homebrew and has no sandbox build."
+      }
     },
     {
       "id": "hermes",
@@ -520,7 +567,10 @@
           "acp"
         ]
       },
-      "signIn": "Run `hermes setup` and choose a provider."
+      "signIn": "Run `hermes setup` and choose a provider.",
+      "sandbox": {
+        "unavailable": "Hermes installs with a script, and running installer scripts in the sandbox is not built yet."
+      }
     }
   ]
 }

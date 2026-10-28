@@ -35,34 +35,32 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
   core (an older core, or none has run) nothing is removed. Remove is refused
   while a room still runs the agent. If a file is gone anyway, the core continues
   the conversation with the agent's current version and says so in its log.
-- **Where to install: this computer or your sandbox.** An agent whose catalog entry
-  has a `sandbox` block offers both on its row, and the choice is made when you
-  install it: *Install on this computer* or *Install in my sandbox* (with its size
-  and what differs). Nothing of a sandbox install is installed or run on your
-  computer: the manager downloads the package's tarball, checks it against the
-  registry's sha512, unpacks it (no npm, none of the package's scripts) into a
-  folder of its own under the workspaces root, and tells the sandbox bridge
-  (`bnbloc.sandbox.mounts/v1`, `perSpace`): each room's sandbox gets a tree of hard
-  links to that one copy, read-only, so ten rooms cost one copy on disk (225 MB
-  for OpenCode 2). The ACP core launches it inside the sandbox (`"sandbox":
-  "guest"`) and never on your computer. The choice is recorded; moving an agent is
-  Remove, then Install in the other place. An update in the sandbox is a click (a
-  conversation continues with the new version), never automatic; Remove is refused
-  while a room may be running it. An organization can offer an agent only in the
-  sandbox (`sandboxOnly`). It needs the desktop app with the sandbox on. The
-  entry names the package for the sandbox's image (`sandbox.package`, `{cpu}` is
-  arm64 or x64; the image is Debian, so glibc builds) and, when the newest
-  generation ships under another name, `sandbox.latest`. Two methods: `tarball` (a platform package that is the
-  program, unpacked as it is) and `npm` (an agent with dependencies: this
-  computer's npm, 10.5 or newer, installs it for the guest's platform with
-  `--os=linux --cpu=<guest> --libc=glibc` and **never runs a script**, `--ignore-scripts`
-  always; the Linux files are never executed here, and rooms run them with the
-  guest's node). `sandbox.signIn: "needed"` marks an agent that works only after
-  the member signs in to its provider, which the sandbox cannot do yet: its sandbox
-  choice is shown disabled with that reason (Gemini, Qwen, Copilot, Cline, Kilo,
-  Auggie and DeepSeek Harness run in the guest, checked with an ACP `initialize`
-  there, and wait for sign-in). Design:
-  [`docs/prd/2026-10-26-sandbox-only-agents-design.md`](https://github.com/luckylhb90/bnbloc/blob/main/docs/prd/2026-10-26-sandbox-only-agents-design.md).
+- **Where to install: this computer or your sandbox, for every agent.** An agent
+  that is not installed shows the same choice, *Where to install*, with both places
+  on its row: *This computer* and *My sandbox*, each with what it means or, greyed
+  out, why it cannot be chosen (never hidden). The choice is recorded and drives the
+  store, the registration, the version looked for, update and remove; moving an agent
+  is Remove, then Install in the other place. An organization can offer an agent only
+  in the sandbox (`sandboxOnly`). Nothing of a sandbox install is installed or run on
+  your computer: the files are unpacked (a platform package, `tarball`) or installed
+  by this computer's npm for the guest's platform (`npm`: 10.5 or newer, `--os=linux
+  --cpu=<guest> --libc=glibc`, **never a script**) into a folder of their own under
+  the workspaces root, and the sandbox bridge gives each room's sandbox a read-only
+  tree of hard links to that one copy (`bnbloc.sandbox.mounts/v1`, `perSpace`), so ten
+  rooms cost one copy on disk. The ACP core launches it inside the sandbox
+  (`"sandbox": "guest"`), never on your computer. It needs the desktop app with the
+  sandbox on.
+
+  A catalog entry's `sandbox` block says how: `method` (`tarball` or `npm`),
+  `package`, `bin`, `latest`, `approxMB`, `note`, `register` (when the sandbox launch
+  line differs from the host's), and `signIn`: `needed` (it works only with a key the
+  sandbox cannot take safely yet) or `login` (its only way in is an account login of
+  its own, which the sandbox must never hold). `unavailable` is the whole block for an
+  agent that cannot be offered, with the reason shown. OpenCode 1.x and OpenCode 2 are
+  two products and two rows. Design:
+  [`docs/prd/2026-10-26-sandbox-only-agents-design.md`](https://github.com/luckylhb90/bnbloc/blob/main/docs/prd/2026-10-26-sandbox-only-agents-design.md),
+  [`docs/prd/2026-10-27-model-credentials.md`](https://github.com/luckylhb90/bnbloc/blob/main/docs/prd/2026-10-27-model-credentials.md)
+  (how an API key will reach the sandbox without entering it).
 - **Update** installs the new version beside the old, checks it, then switches
   the registration. **Roll back** switches it back (the previous version is
   kept). A running agent keeps running from its old files; nothing is signalled.

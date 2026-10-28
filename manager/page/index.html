@@ -32,6 +32,15 @@
   pre { margin:6px 0 0; padding:8px; max-height:180px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; font:12px/1.4 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-all; }
   footer { color:var(--muted); font-size:12px; margin-top:14px; }
   .toggle { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; }
+  .where { margin-top:10px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:var(--bg); }
+  .where .title { font-weight:600; font-size:13px; margin-bottom:6px; }
+  .opt { display:flex; align-items:flex-start; gap:8px; padding:5px 0; }
+  .opt + .opt { border-top:1px solid var(--line); }
+  .opt input { margin-top:3px; }
+  .opt .lab { font-weight:500; }
+  .opt .why { color:var(--muted); font-size:12.5px; margin-top:1px; word-break:break-word; }
+  .opt.off .lab { color:var(--muted); }
+  .where .go { margin-top:8px; display:flex; gap:8px; align-items:center; }
 </style>
 </head>
 <body>

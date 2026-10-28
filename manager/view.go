@@ -2,6 +2,7 @@ package manager
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,6 +34,19 @@ type Managed struct {
 	// Held are versions kept (beyond the current and the previous one) because a
 	// room's conversation still runs from them.
 	Held []string `json:"held,omitempty"`
+}
+
+// PlacementView is one place an agent can be installed: this computer or the
+// member's sandbox. Every agent row carries both, so the choice is the same for
+// every agent; one that cannot be used says why.
+type PlacementView struct {
+	ID    string `json:"id"` // "host" or "sandbox"
+	Label string `json:"label"`
+	Can   bool   `json:"can"`
+	// Reason says why it cannot be chosen (empty when it can).
+	Reason string `json:"reason,omitempty"`
+	// Note says what choosing it means (size, what is different).
+	Note string `json:"note,omitempty"`
 }
 
 // SandboxOfferView is what the page shows beside "Install in my sandbox".
@@ -102,6 +116,9 @@ type AgentView struct {
 	// of it is on this computer). SandboxOffer is set when it can be put there.
 	Sandbox      bool              `json:"sandbox,omitempty"`
 	SandboxOffer *SandboxOfferView `json:"sandboxOffer,omitempty"`
+	// Placements are the two places to install it, when it is not installed by
+	// the manager yet (empty once it is: it stays where it was put).
+	Placements []PlacementView `json:"placements,omitempty"`
 	// Shadowed: the member's own agents.json defines the name this row is given
 	// to rooms under, so their entry is the one rooms run, not this one.
 	Shadowed    bool    `json:"shadowed,omitempty"`
@@ -222,20 +239,12 @@ func (s *Service) agentView(e *Entry) AgentView {
 	}
 
 	v.Can.Install = (e.Install != nil || e.InstallRun != nil) && !managed && v.External == nil && !busy && !sandboxOnly
-	v.Can.InstallSandbox = e.Sandbox != nil && s.SandboxReady() && !managed && !busy && e.Sandbox.SignIn != "needed"
-	if e.Sandbox != nil && e.Sandbox.SignIn == "needed" && !managed && !busy {
-		v.SandboxOffer.NeedsSignIn = true
-	}
-	if e.Sandbox != nil && !managed && !v.Can.InstallSandbox && !busy && !s.SandboxReady() {
-		v.Reason = "Putting this agent in your sandbox needs the desktop app with the sandbox on."
-		if sandboxOnly || e.Install == nil && e.InstallRun == nil {
-			v.Reason = "This agent runs only in your sandbox, which needs the desktop app with the sandbox on."
-		}
-	} else if sandboxOnly && !managed && v.External == nil {
-		v.Reason = "Your organization installs " + e.Name + " only in the sandbox."
-	}
+	v.Can.InstallSandbox = e.Sandbox != nil && e.sandboxRefusal() == "" && s.SandboxReady() && !managed && !busy
 	if e.InstallRun != nil && v.Can.Install {
 		v.InstallCommand = e.InstallRun.Command + " " + strings.Join(e.InstallRun.Args, " ")
+	}
+	if !managed && !busy && e.For == "" {
+		v.Placements = s.placements(e, &v, sandboxOnly)
 	}
 	if !managed && e.Install == nil && e.InstallHint != "" && v.External == nil {
 		v.Reason = e.InstallHint
@@ -345,4 +354,39 @@ func held(all []string, cur, prev string) []string {
 		}
 	}
 	return out
+}
+
+// placements builds the two choices of an agent that is not installed by the
+// manager: the same two for every agent, each enabled or disabled with its reason.
+func (s *Service) placements(e *Entry, v *AgentView, sandboxOnly bool) []PlacementView {
+	host := PlacementView{ID: PlaceHost, Label: "This computer", Can: v.Can.Install}
+	if !host.Can {
+		switch {
+		case sandboxOnly:
+			host.Reason = "Your organization installs " + e.Name + " only in the sandbox."
+		case v.External != nil:
+			host.Reason = "Already on this computer, installed by you (" + v.External.Path + ")."
+		case e.InstallHint != "":
+			host.Reason = e.InstallHint
+		default:
+			host.Reason = "The manager does not install " + e.Name + " on this computer."
+		}
+	}
+	sb := PlacementView{ID: PlaceSandbox, Label: "My sandbox", Can: v.Can.InstallSandbox}
+	switch {
+	case sb.Can:
+		sb.Note = "Nothing of it is installed or run on this computer, and every room shares the one copy"
+		if e.Sandbox.ApproxMB > 0 {
+			sb.Note += " (about " + strconv.Itoa(e.Sandbox.ApproxMB) + " MB)"
+		}
+		sb.Note += "."
+		if e.Sandbox.Note != "" {
+			sb.Note += " " + e.Sandbox.Note
+		}
+	case e.sandboxRefusal() != "":
+		sb.Reason = e.sandboxRefusal()
+	case !s.SandboxReady():
+		sb.Reason = "Needs the desktop app with the sandbox on."
+	}
+	return []PlacementView{host, sb}
 }

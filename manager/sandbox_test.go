@@ -208,8 +208,11 @@ func TestASandboxAgentIsOfferedOnlyWhereTheDesktopGaveItTheSandboxFolders(t *tes
 	svc := sandboxService(t, reg)
 	svc.MountRoot, svc.MountsFile, svc.GuestBase = "", "", ""
 	v := view(svc, "sbx")
-	if v.Can.Install || !strings.Contains(v.Reason, "sandbox") {
-		t.Errorf("without the sandbox's folders: can install %v, reason %q", v.Can.Install, v.Reason)
+	if v.Can.InstallSandbox {
+		t.Errorf("without the sandbox's folders the sandbox cannot be chosen: %+v", v.Can)
+	}
+	if pl := placementOf(v, PlaceSandbox); pl == nil || pl.Can || !strings.Contains(pl.Reason, "sandbox") {
+		t.Errorf("and the row says why: %+v", v.Placements)
 	}
 	if err := do(t, svc, "sbx", ActInstallSandbox); err == nil {
 		t.Error("an install without the sandbox's folders must fail, not fall back to this computer")
@@ -398,6 +401,9 @@ func TestTheMemberChoosesWhereAnAgentIsInstalledAndTheChoiceIsFollowed(t *testin
 	svc := bothService(t, reg)
 
 	v := view(svc, "fake")
+	if h, sb := placementOf(v, PlaceHost), placementOf(v, PlaceSandbox); h == nil || sb == nil || !h.Can || !sb.Can || !strings.Contains(sb.Note, "7 MB") || !strings.Contains(sb.Note, "the new generation") {
+		t.Fatalf("both places are offered on the row, the sandbox one with what it is: %+v", v.Placements)
+	}
 	if !v.Can.Install || !v.Can.InstallSandbox || v.SandboxOffer == nil || v.SandboxOffer.ApproxMB != 7 || v.SandboxOffer.Note != "the new generation" {
 		t.Fatalf("both places are offered, with what the sandbox one is: %+v", v)
 	}
@@ -461,7 +467,10 @@ func TestAnOrganizationCanOfferAnAgentOnlyInTheSandbox(t *testing.T) {
 	svc := bothService(t, reg)
 	svc.Settings.SandboxOnly = map[string]bool{"fake": true}
 	v := view(svc, "fake")
-	if v.Can.Install || !v.Can.InstallSandbox || !v.SandboxOffer.Only || !strings.Contains(v.Reason, "only in the sandbox") {
+	if h := placementOf(v, PlaceHost); h == nil || h.Can || !strings.Contains(h.Reason, "only in the sandbox") {
+		t.Fatalf("the host place is disabled and says why: %+v", v.Placements)
+	}
+	if v.Can.Install || !v.Can.InstallSandbox || !v.SandboxOffer.Only {
 		t.Fatalf("only the sandbox is offered: %+v", v)
 	}
 	if err := do(t, svc, "fake", ActInstall); err == nil || !strings.Contains(err.Error(), "only in the sandbox") {
@@ -632,10 +641,13 @@ func TestAnAgentThatNeedsASignInTheSandboxCannotDoIsShownDisabledWithWhy(t *test
 	svc.eff.Store(nil)
 	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
 	v := view(svc, "dep")
-	if v.Can.InstallSandbox || v.SandboxOffer == nil || !v.SandboxOffer.NeedsSignIn || !v.Can.Install {
+	if sb := placementOf(v, PlaceSandbox); sb == nil || sb.Can || !strings.Contains(sb.Reason, "API key") {
+		t.Fatalf("the sandbox place is disabled and says why: %+v", v.Placements)
+	}
+	if v.Can.InstallSandbox || !v.Can.Install {
 		t.Fatalf("the sandbox choice is disabled and says why, the host install stays: %+v offer %+v", v.Can, v.SandboxOffer)
 	}
-	if err := do(t, svc, "dep", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "sign in") {
+	if err := do(t, svc, "dep", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "API key") {
 		t.Errorf("refused, not just hidden: %v", err)
 	}
 	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep")); len(entries) != 0 {
@@ -643,5 +655,64 @@ func TestAnAgentThatNeedsASignInTheSandboxCannotDoIsShownDisabledWithWhy(t *test
 	}
 	if _, err := ParseCatalog([]byte(`{"version":"x","agents":[{"id":"a","name":"A","install":{"method":"npm","package":"a","bin":"a"},"sandbox":{"method":"npm","bin":"a","signIn":"sometimes"},"latest":{"from":"npm"},"detect":{"command":"a"},"register":{"name":"a"}}]}`)); err == nil {
 		t.Error("an unknown signIn value is refused")
+	}
+}
+
+func placementOf(v AgentView, id string) *PlacementView {
+	for i := range v.Placements {
+		if v.Placements[i].ID == id {
+			return &v.Placements[i]
+		}
+	}
+	return nil
+}
+
+// The same two places on every agent row of the real catalog, each enabled or
+// disabled with a reason; never a row with one and not the other, never a disabled
+// place without its reason.
+func TestEveryAgentOfTheCatalogOffersTheSamePlacesAndSaysWhyOneIsOff(t *testing.T) {
+	cat, err := DefaultCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := newSandboxRegistry(t)
+	svc := sandboxService(t, reg)
+	svc.Catalog = cat
+	svc.eff.Store(nil)
+	for _, a := range svc.Snapshot().Agents {
+		if a.For != "" || a.Status == "unsupported" || a.Status == "blocked" {
+			continue
+		}
+		h, sb := placementOf(a, PlaceHost), placementOf(a, PlaceSandbox)
+		if a.Managed != nil || (a.Status == "installed" && a.External != nil && h == nil) {
+			continue
+		}
+		if h == nil || sb == nil {
+			t.Errorf("%s: the row does not carry both places: %+v", a.ID, a.Placements)
+			continue
+		}
+		for _, p := range []*PlacementView{h, sb} {
+			if !p.Can && p.Reason == "" {
+				t.Errorf("%s: %s is off with no reason", a.ID, p.ID)
+			}
+			if p.Can && p.Reason != "" {
+				t.Errorf("%s: %s is on and carries a reason: %q", a.ID, p.ID, p.Reason)
+			}
+		}
+	}
+	// OpenCode 1.x and OpenCode 2 are two products: two rows, and 1.x is not
+	// offered in the sandbox.
+	var ids []string
+	for _, a := range svc.Snapshot().Agents {
+		ids = append(ids, a.ID)
+	}
+	if !strings.Contains(strings.Join(ids, " "), "opencode opencode2") {
+		t.Errorf("OpenCode 2 is a row of its own beside OpenCode: %v", ids)
+	}
+	if e, _ := cat.Entry("opencode"); e.sandboxRefusal() == "" {
+		t.Error("OpenCode 1.x must say it is not offered in the sandbox")
+	}
+	if e, _ := cat.Entry("opencode2"); e.sandboxRefusal() != "" || e.Install != nil {
+		t.Error("OpenCode 2 is a sandbox agent and is offered there")
 	}
 }

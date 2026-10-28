@@ -44,6 +44,8 @@ function h(tag, props, ...kids) {
 const mb = (n) => n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + " GB" : Math.max(1, Math.round(n / (1 << 20))) + " MB";
 
 let snap = null, confirming = null, actionError = {}, timer = null;
+// The place the member picked for an agent not installed yet (host or sandbox).
+const picked = {};
 
 async function act(id, action) {
   confirming = null; delete actionError[id];
@@ -86,12 +88,14 @@ function card(a) {
   const busy = a.op && a.op.running;
   const btns = [];
   const add = (label, action, primary) => btns.push(h("button", { class: primary ? "primary" : "", onclick: () => act(a.id, action) }, label));
-  const both = a.can.install && a.can.installSandbox;
-  if (a.can.install) {
-    if (a.installCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id + ":install"; render(); } }, both ? "Install on this computer" : "Install"));
-    else add(both ? "Install on this computer" : "Install", "install", true);
+  // Where to install: one choice, the same for every agent. Each place is offered,
+  // or greyed out with its reason; nothing is hidden.
+  const places = a.placements || [];
+  if (places.length) {
+    const on = places.filter((p) => p.can);
+    if (!picked[a.id] || !on.some((p) => p.id === picked[a.id])) picked[a.id] = (on[0] || {}).id;
   }
-  if (a.can.installSandbox) add(a.sandboxOffer && a.sandboxOffer.hostToo ? "Install in my sandbox" : "Install", "install-sandbox", !a.can.install && !a.external);
+
   if (a.can.update) {
     if (a.external && a.updateCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id; render(); } }, a.updateUnknown ? "Run its updater" : "Update"));
     else add("Update", "update", true);
@@ -111,6 +115,9 @@ function card(a) {
     body.push(h("div", { class: "hint" }, a.adapter ? "Rooms run it through the ACP adapter below." : "Kept current here; rooms can’t run it yet (no ACP launch line)."));
   }
   body.push(detail(a));
+  // An agent already on this computer with nothing to choose has no block: it would be
+  // two greyed-out lines on every installed row.
+  if (places.length && !busy && (places.some((p) => p.can) || a.status === "absent")) body.push(whereToInstall(a, places));
   if (confirming === a.id + ":install") {
     body.push(h("div", { class: "hint" }, "This runs on your computer:",
       h("code", { class: "cmd" }, a.installCommand),
@@ -121,18 +128,32 @@ function card(a) {
       h("code", { class: "cmd" }, a.updateCommand),
       h("button", { class: "primary", onclick: () => act(a.id, "update") }, "Run"), " ", h("button", { onclick: () => { confirming = null; render(); } }, "Cancel")));
   }
-  if (a.reason && !(a.can.install || a.can.update) && a.status !== "unsupported") body.push(h("div", { class: "hint" }, a.reason));
-  if (a.sandboxOffer && a.sandboxOffer.needsSignIn) body.push(h("div", { class: "hint" }, "Putting it in your sandbox is not available yet: it works only after you sign in to its provider, and the sandbox cannot do that yet. It still installs on this computer."));
-  if (a.sandboxOffer && a.can.installSandbox) {
-    const o = a.sandboxOffer;
-    body.push(h("div", { class: "hint" }, "In your sandbox: nothing of it is installed or run on this computer, and every room shares the one copy" + (o.approxMB ? " (about " + o.approxMB + " MB)" : "") + ". It works with free models without signing in; signing in to a provider from the sandbox is not available yet. " + (o.note || "")));
-  }
-  if (a.status === "absent" && a.installHint && !a.can.installSandbox) body.push(h("div", { class: "hint" }, a.installHint));
+  if (a.reason && !(a.can.install || a.can.update) && !places.length && a.status !== "unsupported") body.push(h("div", { class: "hint" }, a.reason));
   if (a.status === "installed" && a.signIn && a.managed && !busy) body.push(h("div", { class: "hint" }, a.signIn));
   if (actionError[a.id]) body.push(h("div", { class: "err" }, actionError[a.id]));
   if (a.op && a.op.error && !busy) body.push(h("div", { class: "err" }, a.op.error));
   if (a.op && a.op.log && a.op.log.length) body.push(h("details", { open: busy || !!a.op.error }, h("summary", {}, busy ? "Progress" : "Last operation"), h("pre", {}, a.op.log.join("\n"))));
   return h("div", { class: a.for ? "card sub" : "card", id: "a-" + a.id }, body);
+}
+
+// whereToInstall is the choice of place for an agent the manager has not
+// installed: This computer or My sandbox, each with what it means or why it is off,
+// and one button that does the chosen one.
+function whereToInstall(a, places) {
+  const chosen = picked[a.id];
+  const can = places.some((p) => p.can);
+  const opts = places.map((p) => h("label", { class: "opt" + (p.can ? "" : " off") },
+    h("input", { type: "radio", name: "where-" + a.id, value: p.id, checked: p.id === chosen, disabled: !p.can, onchange: () => { picked[a.id] = p.id; render(); } }),
+    h("div", {}, h("div", { class: "lab" }, p.label), p.can ? (p.note ? h("div", { class: "why" }, p.note) : null) : h("div", { class: "why" }, p.reason || "Not available."))));
+  const run = () => {
+    const p = places.find((x) => x.id === chosen);
+    if (!p) return;
+    if (p.id === "host" && a.installCommand) { confirming = a.id + ":install"; render(); return; }
+    act(a.id, p.id === "sandbox" ? "install-sandbox" : "install");
+  };
+  const label = chosen === "sandbox" ? "Install in my sandbox" : chosen === "host" ? "Install on this computer" : "Install";
+  return h("div", { class: "where" }, h("div", { class: "title" }, "Where to install"), opts,
+    can ? h("div", { class: "go" }, h("button", { class: "primary", onclick: run }, label)) : null);
 }
 
 function render() {

@@ -59,10 +59,20 @@ type SandboxInstall struct {
 	Note string `json:"note,omitempty"`
 	// SignIn is "needed" when the agent cannot work without the member signing in
 	// to its provider and the sandbox has no way to do it yet (a login is a
-	// terminal or browser flow; design §5). The choice is then shown disabled with
-	// that reason, never hidden, and the agent still installs on this computer.
-	// Empty: it works without signing in (free models).
+	// terminal or browser flow; design §5), "login" when its only way in is an
+	// account login of its own (a subscription, an OAuth account) that the sandbox
+	// must never hold (docs/prd/2026-10-27-model-credentials.md). The choice is
+	// then shown disabled with that reason, never hidden, and the agent still
+	// installs on this computer. Empty: it works without signing in (free models).
 	SignIn string `json:"signIn,omitempty"`
+	// Register is how the ACP core launches the sandbox build when it differs from
+	// the entry's own (an agent whose host build is reached through a separate
+	// ACP adapter entry: here the adapter's package is the one installed, and it
+	// carries the agent). Absent: the entry's own register.
+	Register *Register `json:"register,omitempty"`
+	// Unavailable, when set, is the reason this agent is not offered in the sandbox
+	// (shown on the disabled choice); the entry then carries no install fields.
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 var sandboxBinRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
@@ -89,6 +99,12 @@ func (in *SandboxInstall) packageName(e *Entry) string {
 }
 
 func (in *SandboxInstall) validate(e *Entry) error {
+	if in.Unavailable != "" {
+		if in.Package != "" || in.Bin != "" || in.Method != "" || in.Latest != "" || in.SignIn != "" {
+			return errors.New("sandbox.unavailable is the whole block: it carries no install fields")
+		}
+		return nil
+	}
 	switch in.method() {
 	case sandboxTarball:
 		if !packageRE.MatchString(strings.ReplaceAll(in.Package, "{cpu}", "arm64")) {
@@ -110,8 +126,8 @@ func (in *SandboxInstall) validate(e *Entry) error {
 	default:
 		return fmt.Errorf("sandbox.method %q is not tarball or npm", in.Method)
 	}
-	if in.SignIn != "" && in.SignIn != "needed" {
-		return fmt.Errorf("sandbox.signIn %q is not empty or needed", in.SignIn)
+	if in.SignIn != "" && in.SignIn != "needed" && in.SignIn != "login" {
+		return fmt.Errorf("sandbox.signIn %q is not empty, needed or login", in.SignIn)
 	}
 	if in.Latest != "" && !packageRE.MatchString(in.Latest) {
 		return fmt.Errorf("sandbox.latest %q is not an npm package name", in.Latest)
@@ -119,8 +135,13 @@ func (in *SandboxInstall) validate(e *Entry) error {
 	if e.sandboxPackage() == "" {
 		return errors.New("a sandbox agent needs a package to read its version from (sandbox.latest, latest.package or install.package)")
 	}
-	if e.Register == nil {
-		return errors.New("a sandbox agent needs register: rooms are the only way to run it")
+	if e.sandboxRegister() == nil {
+		return errors.New("a sandbox agent needs register (its own, or the sandbox block's): rooms are the only way to run it")
+	}
+	if r := in.Register; r != nil {
+		if !agentNameRE.MatchString(r.Name) || r.CommandEnv != "" || len(r.Env) > 0 {
+			return errors.New("sandbox.register needs an agent name and takes no env or commandEnv: its environment is the sandbox's")
+		}
 	}
 	if e.For != "" {
 		return errors.New("an adapter is not put in the sandbox")
@@ -144,7 +165,7 @@ func (in *SandboxInstall) guestPackage() string {
 
 // sandboxSignIn is shown for an agent that lives in the sandbox: a login is a
 // terminal flow the sandbox does not offer yet (design §5).
-const sandboxSignIn = "Signing in to a provider from the sandbox is not available yet; free models work without it."
+const sandboxSignIn = "Using your own API key from the sandbox is still being built; free models work without one."
 
 // SandboxReady reports whether the desktop gave this app the places a sandbox
 // agent needs: the folder the machine shares and the file the bridge reads the
@@ -585,8 +606,8 @@ func (s *Service) installInSandbox(ctx context.Context, op *operation, e *Entry)
 	if e.Sandbox == nil {
 		return fmt.Errorf("%s cannot be put in the sandbox", e.Name)
 	}
-	if e.Sandbox.SignIn == "needed" {
-		return fmt.Errorf("%s needs you to sign in to its provider, which the sandbox cannot do yet; install it on this computer instead", e.Name)
+	if why := e.sandboxRefusal(); why != "" {
+		return errors.New(why)
 	}
 	if cur, _ := s.managedVersion(e.ID); cur != "" {
 		where := "on this computer"
@@ -754,4 +775,29 @@ func makeReadableByGuest(dir string) (int, error) {
 		return nil
 	})
 	return n, err
+}
+
+// sandboxRegister is the launch line of the sandbox build.
+func (e *Entry) sandboxRegister() *Register {
+	if e.Sandbox != nil && e.Sandbox.Register != nil {
+		return e.Sandbox.Register
+	}
+	return e.Register
+}
+
+// sandboxRefusal is why an agent cannot be put in the sandbox, in words for the
+// member ("" when it can). The one place the reasons are written: the page shows
+// them on the disabled choice and the install refuses with them.
+func (e *Entry) sandboxRefusal() string {
+	switch {
+	case e.Sandbox == nil:
+		return e.Name + " has no sandbox build yet."
+	case e.Sandbox.Unavailable != "":
+		return e.Sandbox.Unavailable
+	case e.Sandbox.SignIn == "login":
+		return e.Name + " signs in with an account login of its own, which the sandbox does not hold: use it on this computer."
+	case e.Sandbox.SignIn == "needed":
+		return "The sandbox version of " + e.Name + " needs your API key, and handing a key to the sandbox safely is still being built. Use it on this computer for now."
+	}
+	return ""
 }
