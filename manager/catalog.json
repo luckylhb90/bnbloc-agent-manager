@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-28.3",
+  "version": "2026-10-29.1",
   "agents": [
     {
       "id": "claude",
@@ -537,7 +537,6 @@
     {
       "id": "hermes",
       "name": "Hermes Agent",
-      "installHint": "Hermes installs with its own installer. macOS, Linux and WSL2: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash. Windows (PowerShell): iex (irm https://hermes-agent.nousresearch.com/install.ps1). Then reopen this page.",
       "detect": {
         "command": "hermes",
         "args": [
@@ -572,7 +571,29 @@
       },
       "signIn": "Run `hermes setup` and choose a provider.",
       "sandbox": {
-        "unavailable": "Hermes installs with a script, and running installer scripts in the sandbox is not built yet."
+        "method": "pip",
+        "python": "3.13",
+        "dataEnv": {
+          "HERMES_BUNDLED_LOCALES": "locales"
+        },
+        "approxMB": 140,
+        "signIn": "key",
+        "note": "Installed from Hermes's published wheels, checked by hash; no installer script runs. It keeps its own data in the sandbox and never touches the Hermes on this computer."
+      },
+      "install": {
+        "method": "pip",
+        "package": "hermes-agent",
+        "extras": [
+          "acp"
+        ],
+        "bin": "hermes",
+        "python": {
+          "min": "3.11",
+          "max": "3.13"
+        }
+      },
+      "latest": {
+        "from": "pypi"
       }
     }
   ]

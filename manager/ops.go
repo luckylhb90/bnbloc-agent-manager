@@ -152,11 +152,18 @@ func (w *lineWriter) flush() { w.op.addLine(w.buf.String()); w.buf.Reset() }
 // log, the whole process group ended when the operation is cancelled or
 // stalls.
 func (s *Service) run(ctx context.Context, op *operation, name string, args ...string) error {
+	return s.runEnv(ctx, op, s.commandEnv(), name, args...)
+}
+
+// runEnv is run with an environment of its own: the command is logged, its
+// output is the operation's log (each line counts as activity), and it is
+// stopped, process group and all, when the operation is cancelled.
+func (s *Service) runEnv(ctx context.Context, op *operation, env []string, name string, args ...string) error {
 	op.logf("$ %s %s", name, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, name, args...)
 	lw := &lineWriter{op: op}
 	cmd.Stdout, cmd.Stderr = lw, lw
-	cmd.Env = s.commandEnv()
+	cmd.Env = env
 	setProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.WaitDelay = 5 * time.Second

@@ -59,7 +59,7 @@ func (s *Service) registration() dropIn {
 		}
 		command := ""
 		if a.Version != "" && e.Install != nil {
-			command = binPath(s.Store.versionDir(e.ID, a.Version), e.Install.Bin)
+			command = installedCommand(s.Store.versionDir(e.ID, a.Version), e.Install)
 		} else if d := s.det[e.ID]; d.Command != "" {
 			command = d.Command
 		}
@@ -91,7 +91,7 @@ func (s *Service) servedCommand(id string) string {
 		return ""
 	}
 	if a := s.state.Agents[id]; a != nil && a.Version != "" && e.Install != nil {
-		return binPath(s.Store.versionDir(id, a.Version), e.Install.Bin)
+		return installedCommand(s.Store.versionDir(id, a.Version), e.Install)
 	}
 	return s.det[id].Command
 }

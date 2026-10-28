@@ -39,15 +39,24 @@ type SandboxInstall struct {
 	// holds the agent's program, unpacked as it is; or "npm": the agent is a
 	// package with dependencies, installed by this computer's npm for the guest's
 	// platform (--os=linux --cpu=<guest> --libc=glibc, never a script) and run by
-	// the guest's own node.
+	// the guest's own node; or "pip": a Python agent, its wheels for the guest's
+	// platform fetched and hash-checked here, unpacked here (never built, never
+	// run) and run by the guest's own python3 (pip.go).
 	Method string `json:"method,omitempty"`
 	// Package is, for "tarball", the npm package whose tarball holds the agent's
 	// files for the guest ({cpu} is the guest's architecture, arm64 or x64); for
 	// "npm", the package to install (the entry's install.package when empty).
 	Package string `json:"package,omitempty"`
 	// Bin is, for "tarball", the agent's program inside the tarball; for "npm",
-	// its command name in node_modules/.bin.
+	// its command name in node_modules/.bin; for "pip", the command's name (the
+	// entry's own install.bin when empty).
 	Bin string `json:"bin"`
+	// Python is, for "pip", the guest's interpreter as major.minor (the image's
+	// own: the wheels are chosen for it).
+	Python string `json:"python,omitempty"`
+	// DataEnv is, for "pip", the variables the package reads to find its bundled
+	// data (a wheel's `.data/data` folder), each to a folder under it.
+	DataEnv map[string]string `json:"dataEnv,omitempty"`
 	// Latest is the npm package the newest sandbox version is read from, when
 	// it is not the entry's own (an agent whose newest generation ships under
 	// another name).
@@ -81,6 +90,7 @@ var sandboxBinRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][
 const (
 	sandboxTarball = "tarball"
 	sandboxNPM     = "npm"
+	sandboxPip     = "pip"
 )
 
 func (in *SandboxInstall) method() string {
@@ -88,6 +98,14 @@ func (in *SandboxInstall) method() string {
 		return sandboxTarball
 	}
 	return in.Method
+}
+
+// command is the name of the agent's command in the guest (pip).
+func (in *SandboxInstall) command(e *Entry) string {
+	if in.Bin != "" {
+		return in.Bin
+	}
+	return e.Install.Bin
 }
 
 // packageName is the package the method installs.
@@ -123,8 +141,29 @@ func (in *SandboxInstall) validate(e *Entry) error {
 		if !binRE.MatchString(in.Bin) {
 			return fmt.Errorf("sandbox.bin %q is not a command name", in.Bin)
 		}
+	case sandboxPip:
+		if e.Install == nil || e.Install.Method != "pip" {
+			return errors.New("a pip sandbox install is the same package as the entry's own pip install: the entry needs install.method pip")
+		}
+		if in.Package != "" {
+			return errors.New("a pip sandbox install takes its package from install.package")
+		}
+		if !pyVersionRE.MatchString(in.Python) {
+			return fmt.Errorf("sandbox.python %q is not major.minor", in.Python)
+		}
+		if in.Bin != "" && !binRE.MatchString(in.Bin) {
+			return fmt.Errorf("sandbox.bin %q is not a command name", in.Bin)
+		}
+		for k, v := range in.DataEnv {
+			if !commandEnvRE.MatchString(k) || deniedEnv(k) || !sandboxBinRE.MatchString(v) {
+				return fmt.Errorf("sandbox.dataEnv %q=%q: an upper-case variable that does not change how a program runs, and a folder name", k, v)
+			}
+		}
+		if minor := minorOf(in.Python); minor < minorOf(e.Install.Python.Min) || (e.Install.Python.Max != "" && minor > minorOf(e.Install.Python.Max)) {
+			return fmt.Errorf("the guest's python %s is outside the package's range %s to %s", in.Python, e.Install.Python.Min, e.Install.Python.Max)
+		}
 	default:
-		return fmt.Errorf("sandbox.method %q is not tarball or npm", in.Method)
+		return fmt.Errorf("sandbox.method %q is not tarball, npm or pip", in.Method)
 	}
 	if in.SignIn != "" && in.SignIn != "key" && in.SignIn != "login" {
 		return fmt.Errorf("sandbox.signIn %q is not empty, key or login", in.SignIn)
@@ -238,6 +277,9 @@ func mountEnv(id string) string {
 // guestCommand is the agent's command line in the guest: the variable and the
 // program's path in the package.
 func guestCommand(e *Entry) string {
+	if e.Sandbox.method() == sandboxPip {
+		return "$" + mountEnv(e.ID) + "/bin/" + e.Sandbox.command(e)
+	}
 	if e.Sandbox.method() == sandboxNPM {
 		return "$" + mountEnv(e.ID) + "/node_modules/.bin/" + e.Sandbox.Bin
 	}
@@ -326,6 +368,9 @@ func (s *Service) sandboxInstall(ctx context.Context, op *operation, e *Entry, v
 	}
 	if e.Sandbox.method() == sandboxNPM {
 		return s.sandboxNPMInstall(ctx, op, e, version)
+	}
+	if e.Sandbox.method() == sandboxPip {
+		return s.sandboxPipInstall(ctx, op, e, version)
 	}
 	in := e.Sandbox
 	pkg := in.guestPackage()

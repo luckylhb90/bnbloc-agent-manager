@@ -36,13 +36,15 @@ type State struct {
 }
 
 // Store is the manager's data directory: <dir>/state.json, the agents under
-// <dir>/agents/<id>/<version>/ and the npm cache under <dir>/npm-cache.
+// <dir>/agents/<id>/<version>/ and the npm and pip caches under <dir>/npm-cache and
+// <dir>/pip-cache.
 type Store struct{ Dir string }
 
 func (s Store) statePath() string              { return filepath.Join(s.Dir, "state.json") }
 func (s Store) agentDir(id string) string      { return filepath.Join(s.Dir, "agents", id) }
 func (s Store) versionDir(id, v string) string { return filepath.Join(s.agentDir(id), v) }
 func (s Store) cacheDir() string               { return filepath.Join(s.Dir, "npm-cache") }
+func (s Store) pipCacheDir() string            { return filepath.Join(s.Dir, "pip-cache") }
 
 // partialSuffix marks a version directory that is not finished.
 const partialSuffix = ".partial"
@@ -108,8 +110,9 @@ func (s Store) SweepPartials() {
 	for _, d := range dirs {
 		inner, _ := os.ReadDir(s.agentDir(d.Name()))
 		for _, v := range inner {
-			if strings.HasSuffix(v.Name(), partialSuffix) {
-				_ = os.RemoveAll(filepath.Join(s.agentDir(d.Name()), v.Name()))
+			vdir := filepath.Join(s.agentDir(d.Name()), v.Name())
+			if _, err := os.Stat(filepath.Join(vdir, installingMarker)); strings.HasSuffix(v.Name(), partialSuffix) || err == nil {
+				_ = os.RemoveAll(vdir)
 			}
 		}
 	}

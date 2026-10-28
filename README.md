@@ -23,10 +23,24 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
 
 - **Lists the catalog** with what is installed (by the manager, or found on your
   computer and how), the newest version, and what you can do.
-- **Install** (npm agents): into its own folder, `<version>/` beside the others,
-  checked (the command must report the version asked for) before anything points
-  at it. The npm cache is its own; your global packages are untouched. Never
-  elevated.
+- **Install** (npm and Python agents): into its own folder, `<version>/` beside the
+  others, checked (the command must report the version asked for) before anything
+  points at it. The npm cache is its own; your global packages are untouched. Never
+  elevated. A **Python** agent (`install.method: pip`, Hermes) is installed from
+  **wheels only**: pip's own resolver names the package, its extras and every
+  dependency as wheels with each one's sha256 (a dependency that has no wheel for
+  the platform fails the install before anything is downloaded; nothing is ever
+  built), the wheels are downloaded with `--require-hashes`, a virtual environment
+  is made in the version's own folder and they are installed into it offline
+  (`--no-index --find-links --require-hashes --no-deps`). No code of the package runs
+  while it is installed, the same guarantee `npm --ignore-scripts` gives. pip runs
+  without your own configuration or index (`PIP_*`, `PYTHONPATH` and a `pip.conf` are
+  ignored); the interpreter is the newest of the catalog's range that is on your
+  PATH (or in `uv`), and the page says which Python to install when there is none.
+  The environment is built where it stays (a virtual environment writes its path into
+  its commands), with an `.installing` marker that a finished install removes and a
+  crash leaves for the next start to sweep. `requirements.lock` stays in the version
+  folder: every wheel with its hash.
 - **A room's conversation is never lost to an update.** A session keeps the
   program it was created with, and continues with it after an idle stop. An old
   version is therefore removed only when no live session needs it: the ACP core
@@ -51,8 +65,8 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
   (`"sandbox": "guest"`), never on your computer. It needs the desktop app with the
   sandbox on.
 
-  A catalog entry's `sandbox` block says how: `method` (`tarball` or `npm`),
-  `package`, `bin`, `latest`, `approxMB`, `note`, `register` (when the sandbox launch
+  A catalog entry's `sandbox` block says how: `method` (`tarball`, `npm` or `pip`),
+  `package`, `bin`, `latest`, `python` and `dataEnv` (pip), `approxMB`, `note`, `register` (when the sandbox launch
   line differs from the host's), and `signIn`: `key` (it works with the member's own API key, which cannot be handed
   to the sandbox safely yet: it is still offered and runs with free or local models,
   and the choice says what is missing) or `login` (its only way in is an account login
@@ -139,7 +153,7 @@ carries a working example (a test holds each example to the rules).
 
 ## Catalog
 
-`manager/catalog.json`: typed entries (an npm package and its command, how a
+`manager/catalog.json`: typed entries (an npm or Python package and its command, how a
 version is read, how an existing install is recognised, an agent's own updater,
 the ACP launch line, the sign-in hint). There is no shell method: every method
 is code that verifies what it did. An entry's facts are probed against the real

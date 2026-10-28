@@ -49,7 +49,12 @@ type Service struct {
 	MountRoot, MountsFile, GuestBase string
 	// RegistryURL is the npm registry (https only; "" = DefaultRegistry).
 	RegistryURL string
-	HTTP        *http.Client
+	// PyPIURL is the Python Package Index's JSON API (https only; "" = DefaultPyPI).
+	PyPIURL string
+	// PyIndexURL is the simple index pip installs from ("" = pip's own default,
+	// the Python Package Index): an organization's mirror.
+	PyIndexURL string
+	HTTP       *http.Client
 	// Version is this component's version, shown on the page.
 	Version string
 	// StallWindow ends an operation with no activity (0 = DefaultStall).
@@ -421,11 +426,10 @@ func (s *Service) targetIn(ctx context.Context, e *Entry, placement string) (str
 		// An agent with no registry (it updates itself) has no target to name.
 		return "", nil
 	}
-	v, err := s.latestFromRegistry(ctx, pkg, hold)
-	if err != nil {
-		return "", err
+	if e.latestFrom(placement) == "pypi" {
+		return s.latestFromPyPI(ctx, pkg, hold)
 	}
-	return v, nil
+	return s.latestFromRegistry(ctx, pkg, hold)
 }
 
 // check looks for the newest version and records it, or why it could not.
@@ -461,6 +465,14 @@ func (s *Service) managedVersion(id string) (cur, prev string) {
 	return "", ""
 }
 
+// installHere puts the version into the store by the entry's method.
+func (s *Service) installHere(ctx context.Context, op *operation, e *Entry, version string) (string, error) {
+	if e.Install.Method == "pip" {
+		return s.pipInstall(ctx, op, e, version)
+	}
+	return s.npmInstall(ctx, op, e, version)
+}
+
 func (s *Service) doInstall(ctx context.Context, op *operation, e *Entry) error {
 	if e.Install == nil && e.InstallRun != nil {
 		return s.runInstaller(ctx, op, e)
@@ -485,12 +497,12 @@ func (s *Service) doInstall(ctx context.Context, op *operation, e *Entry) error 
 		return err
 	}
 	op.logf("installing %s %s", e.Name, v)
-	if _, err := s.npmInstall(ctx, op, e, v); err != nil {
+	if _, err := s.installHere(ctx, op, e, v); err != nil {
 		return err
 	}
 	return s.mutate(func(st *State) {
 		a := s.agentStateIn(st, e.ID)
-		a.Version, a.Previous, a.Method, a.InstalledAt = v, "", "npm", s.now()
+		a.Version, a.Previous, a.Method, a.InstalledAt = v, "", e.Install.Method, s.now()
 		a.Registered = e.Register != nil
 		a.Latest, a.CheckErr = v, ""
 	})
@@ -542,7 +554,7 @@ func (s *Service) updateManaged(ctx context.Context, op *operation, e *Entry, cu
 		return errors.New("the manager does not install " + e.Name)
 	}
 	op.logf("updating %s %s to %s", e.Name, cur, v)
-	if _, err := s.npmInstall(ctx, op, e, v); err != nil {
+	if _, err := s.installHere(ctx, op, e, v); err != nil {
 		return err
 	}
 	if err := s.mutate(func(st *State) {

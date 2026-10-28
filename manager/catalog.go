@@ -70,15 +70,28 @@ type Run struct {
 	Args    []string
 }
 
-// Install is the npm method: a package into <store>/<id>/<version>/.
+// Install is how a package is put into <store>/<id>/<version>/: with npm (the
+// default) or with pip (a Python agent, see pip.go).
 type Install struct {
 	Method  string `json:"method"`
 	Package string `json:"package"`
 	Bin     string `json:"bin"`
+	// Extras are the package's own optional dependency groups the install
+	// takes (pip only: hermes-agent[acp]).
+	Extras []string `json:"extras,omitempty"`
+	// Python is the range of interpreters the package runs on (pip only; a
+	// version is major.minor): the install looks for one on this computer.
+	Python *PythonRange `json:"python,omitempty"`
 	// IgnoreScripts runs npm with --ignore-scripts (the default when absent).
 	IgnoreScripts *bool `json:"ignoreScripts,omitempty"`
 	// Requires are tools that must be present, in the login-shell environment.
 	Requires []Require `json:"requires,omitempty"`
+}
+
+// PythonRange is the interpreters a Python package runs on, inclusive.
+type PythonRange struct {
+	Min string `json:"min"`
+	Max string `json:"max,omitempty"`
 }
 
 // Require is a tool prerequisite.
@@ -88,7 +101,8 @@ type Require struct {
 	Hint string `json:"hint,omitempty"`
 }
 
-// Latest is where the newest version comes from. Only "npm" is built.
+// Latest is where the newest version comes from: "npm" (the npm registry) or
+// "pypi" (the Python Package Index).
 type Latest struct {
 	From    string `json:"from"`
 	Package string `json:"package,omitempty"`
@@ -154,6 +168,10 @@ var (
 	binRE        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	agentNameRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	commandEnvRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
+	// pypiNameRE is a distribution name as PyPI normalises it (letters, digits,
+	// dot, dash, underscore).
+	pypiNameRE  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+	pyVersionRE = regexp.MustCompile(`^3\.[0-9]{1,2}$`)
 )
 
 // deniedEnv is a variable that changes how a program loads or runs, which a
@@ -256,11 +274,28 @@ func (e *Entry) validate() error {
 		e.Detect.parse = re
 	}
 	if in := e.Install; in != nil {
-		if in.Method != "npm" {
-			return fmt.Errorf("install.method %q is not a method this component has (npm)", in.Method)
-		}
-		if !packageRE.MatchString(in.Package) {
-			return fmt.Errorf("install.package %q is not an npm package name", in.Package)
+		switch in.Method {
+		case "npm":
+			if !packageRE.MatchString(in.Package) {
+				return fmt.Errorf("install.package %q is not an npm package name", in.Package)
+			}
+			if len(in.Extras) > 0 || in.Python != nil {
+				return fmt.Errorf("install.extras and install.python are for the pip method")
+			}
+		case "pip":
+			if !pypiNameRE.MatchString(in.Package) {
+				return fmt.Errorf("install.package %q is not a Python package name", in.Package)
+			}
+			for _, x := range in.Extras {
+				if !pypiNameRE.MatchString(x) {
+					return fmt.Errorf("install.extras %q is not a name", x)
+				}
+			}
+			if in.Python == nil || !pyVersionRE.MatchString(in.Python.Min) || (in.Python.Max != "" && !pyVersionRE.MatchString(in.Python.Max)) {
+				return fmt.Errorf("install.python needs min (and max) as major.minor")
+			}
+		default:
+			return fmt.Errorf("install.method %q is not a method this component has (npm, pip)", in.Method)
 		}
 		if !binRE.MatchString(in.Bin) {
 			return fmt.Errorf("install.bin %q is not a command name", in.Bin)
@@ -272,14 +307,17 @@ func (e *Entry) validate() error {
 		}
 	}
 	if l := e.Latest; l != nil {
-		if l.From != "npm" {
-			return fmt.Errorf("latest.from %q is not a source this component has (npm)", l.From)
+		if l.From != "npm" && l.From != "pypi" {
+			return fmt.Errorf("latest.from %q is not a source this component has (npm, pypi)", l.From)
 		}
 		if l.Package == "" && e.Install == nil {
-			return fmt.Errorf("latest.from npm needs a package")
+			return fmt.Errorf("latest.from %s needs a package", l.From)
 		}
-		if l.Package != "" && !packageRE.MatchString(l.Package) {
-			return fmt.Errorf("latest.package %q is not an npm package name", l.Package)
+		if l.Package != "" && !packageRE.MatchString(l.Package) && !pypiNameRE.MatchString(l.Package) {
+			return fmt.Errorf("latest.package %q is not a package name", l.Package)
+		}
+		if l.From == "pypi" && e.Install != nil && e.Install.Method != "pip" && l.Package == "" {
+			return fmt.Errorf("latest.from pypi on an npm install needs its own package")
 		}
 	}
 	for _, f := range e.Found {
@@ -332,7 +370,23 @@ func (e *Entry) RunsHere() bool {
 	return len(e.Platforms) == 0 || slices.Contains(e.Platforms, runtime.GOOS)
 }
 
-// Package is the npm package the newest version is read from.
+// latestFrom is the index the newest version of the agent in a placement is read
+// from: the sandbox's own package comes from the npm registry unless the entry's
+// install is a Python package that the sandbox builds from the same wheels.
+func (e *Entry) latestFrom(placement string) string {
+	if placement != PlaceSandbox && e.Latest != nil && e.Latest.From == "pypi" {
+		return "pypi"
+	}
+	if placement == PlaceSandbox && e.Sandbox != nil && e.Sandbox.method() == sandboxPip {
+		return "pypi"
+	}
+	if e.Install != nil && e.Install.Method == "pip" && (e.Latest == nil || e.Latest.From == "") {
+		return "pypi"
+	}
+	return "npm"
+}
+
+// Package is the package the newest version is read from.
 func (e *Entry) Package() string {
 	if e.Latest != nil && e.Latest.Package != "" {
 		return e.Latest.Package
