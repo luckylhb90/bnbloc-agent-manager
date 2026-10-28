@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
@@ -733,5 +734,33 @@ func TestEveryAgentOfTheCatalogOffersTheSamePlacesAndSaysWhyOneIsOff(t *testing.
 	}
 	if e, _ := cat.Entry("opencode2"); e.sandboxRefusal() != "" || e.Install != nil {
 		t.Error("OpenCode 2 is a sandbox agent and is offered there")
+	}
+}
+
+// An agent lives in one place. A copy the member installed themselves counts: with
+// it on this computer the sandbox is not offered (and refuses), because two copies
+// would register under one name and the ACP core would keep one of them, so a room
+// believed to be isolated could run on this computer.
+func TestAnAgentAlreadyOnThisComputerCannotAlsoBePutInTheSandbox(t *testing.T) {
+	fakeNPM(t)
+	reg := newSandboxRegistry(t)
+	reg.publish(t, "2.0.0")
+	svc := bothService(t, reg)
+	foundAgent(t, "fakeagent", "somebin", "1.0.0")
+	svc.RefreshDetected(context.Background())
+
+	v := view(svc, "fake")
+	sb := placementOf(v, PlaceSandbox)
+	if v.Can.InstallSandbox || sb == nil || sb.Can || !strings.Contains(sb.Reason, "already on this computer") || !strings.Contains(sb.Reason, "remove that copy first") {
+		t.Fatalf("with a copy on this computer the sandbox is off and says why: can %+v placement %+v", v.Can, sb)
+	}
+	if err := do(t, svc, "fake", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "already on this computer") {
+		t.Fatalf("refused, not only hidden: %v", err)
+	}
+	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("fake")); len(entries) != 0 {
+		t.Errorf("nothing was installed: %v", entries)
+	}
+	if ms := readMounts(t, svc); len(ms) != 0 {
+		t.Errorf("the sandbox was given nothing: %+v", ms)
 	}
 }

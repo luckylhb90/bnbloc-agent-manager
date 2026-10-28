@@ -2,7 +2,7 @@
   "kind": "bnbloc.plugin.package/v1",
   "contract": "bnbloc.plugin.contract/v1",
   "name": "agent-manager",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "publisher": "bnbloc",
   "description": "See the coding agents on your computer, install and update them, and give them to your rooms. Nothing is installed or changed until you click.",
   "runtime": "sidecar",

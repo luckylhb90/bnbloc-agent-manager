@@ -616,6 +616,9 @@ func (s *Service) installInSandbox(ctx context.Context, op *operation, e *Entry)
 		}
 		return fmt.Errorf("%s %s is already installed %s; remove it first to put it somewhere else", e.Name, cur, where)
 	}
+	if why := s.alreadyOnThisComputer(e); why != "" {
+		return errors.New(why)
+	}
 	v, err := s.targetIn(ctx, e, PlaceSandbox)
 	if err != nil {
 		return err
@@ -650,6 +653,21 @@ func (s *Service) updateInSandbox(ctx context.Context, op *operation, e *Entry, 
 	}
 	s.sandboxStore().Prune(e.ID, v, cur)
 	return nil
+}
+
+// alreadyOnThisComputer is why an agent cannot be put in the sandbox while a copy of
+// it is on this computer ("" when none is): an agent lives in one place. Two copies
+// would register under one name, the ACP core would keep one of them and which is
+// not decided by the member, so a room they believed was isolated could run on this
+// computer. The copy the member installed is theirs; the manager does not remove it.
+func (s *Service) alreadyOnThisComputer(e *Entry) string {
+	s.mu.Lock()
+	d := s.det[e.ID]
+	s.mu.Unlock()
+	if d.Command == "" {
+		return ""
+	}
+	return e.Name + " is already on this computer (" + d.Path + "). An agent lives in one place: remove that copy first to use it in the sandbox."
 }
 
 // sandboxOnly reports an agent the organization offers only in the sandbox.
