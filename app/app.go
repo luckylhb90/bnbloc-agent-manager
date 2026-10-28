@@ -22,7 +22,7 @@
 // The same binary is a command line for the same work:
 //
 //	bnbloc-agent-manager list
-//	bnbloc-agent-manager check | install | update | rollback | remove | register | unregister <id>
+//	bnbloc-agent-manager check | install | install-sandbox | update | rollback | remove | register | unregister <id>
 //	bnbloc-agent-manager serve [--page]   (the loopback API; --page also serves the page at /)
 package app
 
@@ -100,7 +100,7 @@ func Main(args []string, cat *manager.Catalog, version string) error {
 		svc.RefreshDetected(context.Background())
 		svc.CheckAll(context.Background())
 		return list(os.Stdout, svc)
-	case manager.ActCheck, manager.ActInstall, manager.ActUpdate, manager.ActRollback, manager.ActRemove, manager.ActRegister, manager.ActUnregister:
+	case manager.ActCheck, manager.ActInstall, manager.ActInstallSandbox, manager.ActUpdate, manager.ActRollback, manager.ActRemove, manager.ActRegister, manager.ActUnregister:
 		if len(rest) != 1 {
 			return fmt.Errorf("usage: bnbloc-agent-manager %s <agent id>", cmd)
 		}

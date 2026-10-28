@@ -634,20 +634,39 @@ func TestAPackageThatNamesAnotherVersionOrNoCommandIsNotInstalled(t *testing.T) 
 	}
 }
 
-func TestAnAgentThatNeedsASignInTheSandboxCannotDoIsShownDisabledWithWhy(t *testing.T) {
+func TestAnAgentThatNeedsAKeyTheSandboxCannotTakeIsOfferedAndSaysWhatIsMissing(t *testing.T) {
 	fakeCrossNPM(t, "11.9.0")
 	svc := npmSandboxService(t)
-	svc.Catalog.Agents[0].Sandbox.SignIn = "needed"
+	svc.Catalog.Agents[0].Sandbox.SignIn = "key"
 	svc.eff.Store(nil)
 	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
 	v := view(svc, "dep")
-	if sb := placementOf(v, PlaceSandbox); sb == nil || sb.Can || !strings.Contains(sb.Reason, "API key") {
-		t.Fatalf("the sandbox place is disabled and says why: %+v", v.Placements)
+	sb := placementOf(v, PlaceSandbox)
+	if sb == nil || !sb.Can || !strings.Contains(sb.Note, "API key cannot be used in the sandbox yet") {
+		t.Fatalf("the sandbox place is on and says what is missing: %+v", v.Placements)
+	}
+	if !v.Can.InstallSandbox || !v.Can.Install {
+		t.Fatalf("both places can be chosen: %+v", v.Can)
+	}
+	if err := do(t, svc, "dep", ActInstallSandbox); err != nil {
+		t.Fatalf("it installs: %v", err)
+	}
+}
+
+func TestAnAgentWhoseOnlyWayInIsAnAccountLoginIsNotOfferedInTheSandbox(t *testing.T) {
+	fakeCrossNPM(t, "11.9.0")
+	svc := npmSandboxService(t)
+	svc.Catalog.Agents[0].Sandbox.SignIn = "login"
+	svc.eff.Store(nil)
+	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
+	v := view(svc, "dep")
+	if sb := placementOf(v, PlaceSandbox); sb == nil || sb.Can || !strings.Contains(sb.Reason, "account login") {
+		t.Fatalf("the sandbox place is off and says why: %+v", v.Placements)
 	}
 	if v.Can.InstallSandbox || !v.Can.Install {
-		t.Fatalf("the sandbox choice is disabled and says why, the host install stays: %+v offer %+v", v.Can, v.SandboxOffer)
+		t.Fatalf("the host install stays: %+v", v.Can)
 	}
-	if err := do(t, svc, "dep", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "API key") {
+	if err := do(t, svc, "dep", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "account login") {
 		t.Errorf("refused, not just hidden: %v", err)
 	}
 	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep")); len(entries) != 0 {
@@ -709,8 +728,8 @@ func TestEveryAgentOfTheCatalogOffersTheSamePlacesAndSaysWhyOneIsOff(t *testing.
 	if !strings.Contains(strings.Join(ids, " "), "opencode opencode2") {
 		t.Errorf("OpenCode 2 is a row of its own beside OpenCode: %v", ids)
 	}
-	if e, _ := cat.Entry("opencode"); e.sandboxRefusal() == "" {
-		t.Error("OpenCode 1.x must say it is not offered in the sandbox")
+	if e, _ := cat.Entry("opencode"); e.sandboxRefusal() != "" || e.Install == nil {
+		t.Errorf("OpenCode 1.x is installable on this computer and in the sandbox: %q", e.sandboxRefusal())
 	}
 	if e, _ := cat.Entry("opencode2"); e.sandboxRefusal() != "" || e.Install != nil {
 		t.Error("OpenCode 2 is a sandbox agent and is offered there")

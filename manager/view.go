@@ -383,6 +383,9 @@ func (s *Service) placements(e *Entry, v *AgentView, sandboxOnly bool) []Placeme
 		if e.Sandbox.Note != "" {
 			sb.Note += " " + e.Sandbox.Note
 		}
+		if e.Sandbox.SignIn == "key" {
+			sb.Note += " " + sandboxKeyNote
+		}
 	case e.sandboxRefusal() != "":
 		sb.Reason = e.sandboxRefusal()
 	case !s.SandboxReady():

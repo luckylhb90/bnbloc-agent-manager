@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-28.1",
+  "version": "2026-10-28.3",
   "agents": [
     {
       "id": "claude",
@@ -31,7 +31,7 @@
       ],
       "signIn": "Run `claude` once and sign in.",
       "sandbox": {
-        "unavailable": "Claude Code signs in with your Claude account, which Anthropic allows only inside Claude Code itself. With an API key it will be offered once the sandbox can hold keys safely; until then use it on this computer."
+        "unavailable": "Claude Code signs in with your Claude account, which Anthropic allows only inside Claude Code itself. Use it on this computer; with an API key it can be offered once the sandbox can hold keys safely."
       }
     },
     {
@@ -87,7 +87,7 @@
         "package": "@agentclientprotocol/codex-acp",
         "bin": "codex-acp",
         "approxMB": 401,
-        "signIn": "needed",
+        "signIn": "key",
         "register": {
           "name": "codex",
           "profile": {
@@ -155,7 +155,7 @@
         "method": "npm",
         "bin": "gemini",
         "approxMB": 100,
-        "signIn": "needed"
+        "signIn": "key"
       }
     },
     {
@@ -206,7 +206,10 @@
       },
       "signIn": "Run `opencode auth login` and sign in.",
       "sandbox": {
-        "unavailable": "OpenCode 1.x is not offered in the sandbox. The new generation is its own agent, OpenCode 2."
+        "package": "opencode-linux-{cpu}",
+        "bin": "bin/opencode",
+        "approxMB": 211,
+        "note": "It works with free models without signing in. It runs from the platform package directly; no install script runs."
       }
     },
     {
@@ -273,7 +276,7 @@
         "method": "npm",
         "bin": "qwen",
         "approxMB": 286,
-        "signIn": "needed"
+        "signIn": "key"
       }
     },
     {
@@ -366,7 +369,7 @@
         "method": "npm",
         "bin": "kilo",
         "approxMB": 322,
-        "signIn": "needed"
+        "signIn": "key"
       }
     },
     {
@@ -435,7 +438,7 @@
         "method": "npm",
         "bin": "dsh",
         "approxMB": 852,
-        "signIn": "needed"
+        "signIn": "key"
       }
     },
     {

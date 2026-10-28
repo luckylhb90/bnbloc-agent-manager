@@ -53,9 +53,10 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
 
   A catalog entry's `sandbox` block says how: `method` (`tarball` or `npm`),
   `package`, `bin`, `latest`, `approxMB`, `note`, `register` (when the sandbox launch
-  line differs from the host's), and `signIn`: `needed` (it works only with a key the
-  sandbox cannot take safely yet) or `login` (its only way in is an account login of
-  its own, which the sandbox must never hold). `unavailable` is the whole block for an
+  line differs from the host's), and `signIn`: `key` (it works with the member's own API key, which cannot be handed
+  to the sandbox safely yet: it is still offered and runs with free or local models,
+  and the choice says what is missing) or `login` (its only way in is an account login
+  of its own, which the sandbox must never hold: not offered). `unavailable` is the whole block for an
   agent that cannot be offered, with the reason shown. OpenCode 1.x and OpenCode 2 are
   two products and two rows. Design:
   [`docs/prd/2026-10-26-sandbox-only-agents-design.md`](https://github.com/luckylhb90/bnbloc/blob/main/docs/prd/2026-10-26-sandbox-only-agents-design.md),

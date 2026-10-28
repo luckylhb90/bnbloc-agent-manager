@@ -57,13 +57,13 @@ type SandboxInstall struct {
 	// Note says what differs from installing on this computer (shown on the
 	// choice).
 	Note string `json:"note,omitempty"`
-	// SignIn is "needed" when the agent cannot work without the member signing in
-	// to its provider and the sandbox has no way to do it yet (a login is a
-	// terminal or browser flow; design §5), "login" when its only way in is an
-	// account login of its own (a subscription, an OAuth account) that the sandbox
-	// must never hold (docs/prd/2026-10-27-model-credentials.md). The choice is
-	// then shown disabled with that reason, never hidden, and the agent still
-	// installs on this computer. Empty: it works without signing in (free models).
+	// SignIn says how the agent gets a model in the sandbox. "key": with the
+	// member's own API key, which cannot be handed to the sandbox safely yet
+	// (docs/prd/2026-10-27-model-credentials.md): the agent is still offered and
+	// runs (free or local models work), and the choice says what is missing.
+	// "login": its only way in is an account login of its own (a subscription, an
+	// OAuth account) that the sandbox must never hold: not offered, with that
+	// reason. Empty: it needs nothing (free models).
 	SignIn string `json:"signIn,omitempty"`
 	// Register is how the ACP core launches the sandbox build when it differs from
 	// the entry's own (an agent whose host build is reached through a separate
@@ -126,8 +126,8 @@ func (in *SandboxInstall) validate(e *Entry) error {
 	default:
 		return fmt.Errorf("sandbox.method %q is not tarball or npm", in.Method)
 	}
-	if in.SignIn != "" && in.SignIn != "needed" && in.SignIn != "login" {
-		return fmt.Errorf("sandbox.signIn %q is not empty, needed or login", in.SignIn)
+	if in.SignIn != "" && in.SignIn != "key" && in.SignIn != "login" {
+		return fmt.Errorf("sandbox.signIn %q is not empty, key or login", in.SignIn)
 	}
 	if in.Latest != "" && !packageRE.MatchString(in.Latest) {
 		return fmt.Errorf("sandbox.latest %q is not an npm package name", in.Latest)
@@ -796,8 +796,10 @@ func (e *Entry) sandboxRefusal() string {
 		return e.Sandbox.Unavailable
 	case e.Sandbox.SignIn == "login":
 		return e.Name + " signs in with an account login of its own, which the sandbox does not hold: use it on this computer."
-	case e.Sandbox.SignIn == "needed":
-		return "The sandbox version of " + e.Name + " needs your API key, and handing a key to the sandbox safely is still being built. Use it on this computer for now."
 	}
 	return ""
 }
+
+// sandboxKeyNote is what a sandbox install of an agent that works with the member's
+// own key says before it is chosen: the agent runs, but their key does not reach it yet.
+const sandboxKeyNote = "Your own API key cannot be used in the sandbox yet (handing a key to it safely is still being built), so it works with free or local models only."
