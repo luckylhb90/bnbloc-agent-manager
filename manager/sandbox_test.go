@@ -852,7 +852,9 @@ func TestAnOldSandboxRecordIsKeptWhileARoomRunsFromIt(t *testing.T) {
 	if err := os.MkdirAll(old, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.mutate(func(st *State) { st.Agents["fake"] = &AgentState{Version: "2.0.0", Method: sandboxMethod, Registered: true} }); err != nil {
+	if err := svc.mutate(func(st *State) {
+		st.Agents["fake"] = &AgentState{Version: "2.0.0", Method: sandboxMethod, Registered: true}
+	}); err != nil {
 		t.Fatal(err)
 	}
 	writeInUse(t, svc, time.Now(), false, "$BNBLOC_MOUNT_AGENT_FAKE/bin/tool")
