@@ -687,23 +687,20 @@ func TestAnAgentThatNeedsAKeyTheSandboxCannotTakeIsOfferedAndSaysWhatIsMissing(t
 	}
 }
 
-func TestAnAgentWhoseOnlyWayInIsAnAccountLoginIsNotOfferedInTheSandbox(t *testing.T) {
+// An agent whose only way in is an account login of its own is installed like any other: its line says
+// what the member has to do, and nothing stops them. Whether it is useful in the sandbox is for the
+// member who installs it to find out (no agent is refused for how it signs in).
+func TestAnAgentThatSignsInWithAnAccountLoginIsInstalledLikeAnyOtherAndSaysSo(t *testing.T) {
 	fakeCrossNPM(t, "11.9.0")
 	svc := npmSandboxService(t)
 	setSandbox(svc, "dep", func(sb *SandboxInstall) { sb.SignIn = "login" })
 	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
 	v := view(svc, "dep-sandbox")
-	if v.Can.InstallSandbox || !strings.Contains(v.Reason, "account login") {
-		t.Fatalf("the sandbox line is off and says why: %+v", v)
+	if !v.Can.InstallSandbox || !strings.Contains(v.Note, "account login") {
+		t.Fatalf("the sandbox line is offered and says what the login is: %+v", v)
 	}
-	if !view(svc, "dep").Can.Install {
-		t.Fatalf("the computer line stays")
-	}
-	if err := do(t, svc, "dep-sandbox", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "account login") {
-		t.Errorf("refused, not just hidden: %v", err)
-	}
-	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep-sandbox")); len(entries) != 0 {
-		t.Errorf("nothing was installed: %v", entries)
+	if err := do(t, svc, "dep-sandbox", ActInstallSandbox); err != nil {
+		t.Fatalf("it installs: %v", err)
 	}
 	if _, err := ParseCatalog([]byte(`{"version":"x","agents":[{"id":"a","name":"A","install":{"method":"npm","package":"a","bin":"a"},"sandbox":{"method":"npm","bin":"a","signIn":"sometimes"},"latest":{"from":"npm"},"detect":{"command":"a"},"register":{"name":"a"}}]}`)); err == nil {
 		t.Error("an unknown signIn value is refused")
@@ -732,8 +729,8 @@ func TestEveryAgentOfTheCatalogHasItsTwoLinesAndSaysWhyOneIsOff(t *testing.T) {
 			if i, ok := index[a.SandboxOf]; !ok || index[a.ID] != i+1 {
 				t.Errorf("%s is not right after %s", a.ID, a.SandboxOf)
 			}
-			if !a.Can.InstallSandbox && a.Managed == nil && a.Reason == "" {
-				t.Errorf("%s is off with no reason", a.ID)
+			if !a.Can.InstallSandbox && a.Managed == nil {
+				t.Errorf("%s cannot be installed in the sandbox (%q): no agent is refused it", a.ID, a.Reason)
 			}
 			if a.Can.Install {
 				t.Errorf("%s offers a computer install", a.ID)

@@ -147,8 +147,11 @@ func (s *Service) agentView(e *Entry) AgentView {
 		v.SignIn = sandboxSignIn
 		v.Note = e.Sandbox.Note
 		v.ApproxMB = e.Sandbox.ApproxMB
-		if e.Sandbox.SignIn == "key" {
+		switch e.Sandbox.SignIn {
+		case "key":
 			v.Note = strings.TrimSpace(v.Note + " " + sandboxKeyNote)
+		case "login":
+			v.Note = strings.TrimSpace(v.Note + " " + sandboxLoginNote)
 		}
 	}
 	if op != nil {

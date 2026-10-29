@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -54,6 +55,14 @@ type SandboxInstall struct {
 	// Python is, for "pip", the guest's interpreter as major.minor (the image's
 	// own: the wheels are chosen for it).
 	Python string `json:"python,omitempty"`
+	// AlsoInstall are other packages installed in the same folder (npm): an agent whose ACP
+	// adapter and program are two packages (pi, pi-acp) installs as one line. They are at
+	// the version the index gives them, held and pinned like the line's own.
+	AlsoInstall []string `json:"alsoInstall,omitempty"`
+	// LaunchEnv are variables the launch line needs, each to a path inside the version folder
+	// ("node_modules/.bin/pi"): a guest entry takes no env, so the manager writes a launcher
+	// (bin/<Bin>) that sets them and runs the program. The ACP core runs the launcher.
+	LaunchEnv map[string]string `json:"launchEnv,omitempty"`
 	// Release is, for "release", where the compiled program is published (release.go): the
 	// program is one executable per CPU, installed as <version>/bin/<Bin>.
 	Release *ReleaseInstall `json:"release,omitempty"`
@@ -69,25 +78,37 @@ type SandboxInstall struct {
 	// Note says what differs from installing on this computer (shown on the
 	// choice).
 	Note string `json:"note,omitempty"`
-	// SignIn says how the agent gets a model in the sandbox. "key": with the
-	// member's own API key, which cannot be handed to the sandbox safely yet
-	// (docs/prd/2026-10-27-model-credentials.md): the agent is still offered and
-	// runs (free or local models work), and the choice says what is missing.
-	// "login": its only way in is an account login of its own (a subscription, an
-	// OAuth account) that the sandbox must never hold: not offered, with that
-	// reason. Empty: it needs nothing (free models).
+	// SignIn says how the agent gets a model in the sandbox, as a note on its line
+	// and nothing more: no agent is refused for it. "key": with the member's own API
+	// key; "login": with an account login of its own. Neither reaches the sandbox
+	// by itself yet (docs/prd/2026-10-27-model-credentials.md), and whether the
+	// agent is useful there is for the member who installs it to find out. Empty:
+	// it needs nothing (free models).
 	SignIn string `json:"signIn,omitempty"`
 	// Register is how the ACP core launches the sandbox build when it differs from
 	// the entry's own (an agent whose host build is reached through a separate
 	// ACP adapter entry: here the adapter's package is the one installed, and it
 	// carries the agent). Absent: the entry's own register.
 	Register *Register `json:"register,omitempty"`
-	// Unavailable, when set, is the reason this agent is not offered in the sandbox
-	// (shown on the disabled choice); the entry then carries no install fields.
-	Unavailable string `json:"unavailable,omitempty"`
 }
 
 var sandboxBinRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
+
+// launchPathRE is a path inside an npm install, which has hidden folders (node_modules/.bin/pi): segments
+// may start with a dot, but a segment is never `.` or `..`.
+var launchPathRE = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
+
+func validLaunchPath(p string) bool {
+	if !launchPathRE.MatchString(p) {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
 
 // Sandbox install methods.
 const (
@@ -121,12 +142,6 @@ func (in *SandboxInstall) packageName(e *Entry) string {
 }
 
 func (in *SandboxInstall) validate(e *Entry) error {
-	if in.Unavailable != "" {
-		if in.Package != "" || in.Bin != "" || in.Method != "" || in.Latest != "" || in.SignIn != "" {
-			return errors.New("sandbox.unavailable is the whole block: it carries no install fields")
-		}
-		return nil
-	}
 	switch in.method() {
 	case sandboxTarball:
 		if !packageRE.MatchString(strings.ReplaceAll(in.Package, "{cpu}", "arm64")) {
@@ -184,6 +199,21 @@ func (in *SandboxInstall) validate(e *Entry) error {
 	}
 	if in.Release != nil && in.method() != sandboxRelease {
 		return errors.New("sandbox.release belongs to the release method")
+	}
+	if len(in.AlsoInstall) > 0 || len(in.LaunchEnv) > 0 {
+		if in.method() != sandboxNPM {
+			return errors.New("sandbox.alsoInstall and sandbox.launchEnv belong to the npm method")
+		}
+		for _, p := range in.AlsoInstall {
+			if !packageRE.MatchString(p) {
+				return fmt.Errorf("sandbox.alsoInstall %q is not an npm package name", p)
+			}
+		}
+		for k, v := range in.LaunchEnv {
+			if !commandEnvRE.MatchString(k) || deniedEnv(k) || !validLaunchPath(v) {
+				return fmt.Errorf("sandbox.launchEnv %q=%q: an upper-case variable that does not change how a program runs, and a path inside the install", k, v)
+			}
+		}
 	}
 	if in.SignIn != "" && in.SignIn != "key" && in.SignIn != "login" {
 		return fmt.Errorf("sandbox.signIn %q is not empty, key or login", in.SignIn)
@@ -302,6 +332,9 @@ func guestCommand(e *Entry) string {
 		return "$" + mountEnv(e.ID) + "/bin/" + e.Sandbox.command(e)
 	}
 	if e.Sandbox.method() == sandboxNPM {
+		if len(e.Sandbox.LaunchEnv) > 0 {
+			return "$" + mountEnv(e.ID) + "/bin/" + e.Sandbox.Bin
+		}
 		return "$" + mountEnv(e.ID) + "/node_modules/.bin/" + e.Sandbox.Bin
 	}
 	return "$" + mountEnv(e.ID) + "/" + e.Sandbox.Bin
@@ -763,6 +796,9 @@ func (s *Service) sandboxNPMInstall(ctx context.Context, op *operation, e *Entry
 	args := []string{"install", "--prefix", partial, "--cache", s.Store.cacheDir(),
 		"--os=linux", "--cpu=" + npmCPU(), "--libc=glibc", "--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--loglevel=http",
 		pkg + "@" + version}
+	for _, extra := range in.AlsoInstall {
+		args = append(args, extra)
+	}
 	op.logf("installing %s %s for the sandbox's platform (linux %s)", pkg, version, npmCPU())
 	if err := s.run(ctx, op, npm, args...); err != nil {
 		return err
@@ -772,6 +808,11 @@ func (s *Service) sandboxNPMInstall(ctx context.Context, op *operation, e *Entry
 	}
 	if fi, err := os.Lstat(filepath.Join(partial, "node_modules", ".bin", in.Bin)); err != nil || fi.Mode()&(os.ModeSymlink|0o111) == 0 {
 		return fmt.Errorf("npm finished and %s is not in the package: the catalog's command name may be wrong", in.Bin)
+	}
+	if len(in.LaunchEnv) > 0 {
+		if err := writeEnvLauncher(filepath.Join(partial, "bin"), in.Bin, in.LaunchEnv, filepath.Join("node_modules", ".bin", in.Bin)); err != nil {
+			return err
+		}
 	}
 	n, err := makeReadableByGuest(partial)
 	if err != nil {
@@ -789,6 +830,30 @@ func (s *Service) sandboxNPMInstall(ctx context.Context, op *operation, e *Entry
 	}
 	ok = true
 	return nil
+}
+
+// writeEnvLauncher writes bin/<command>: a shell script that sets each variable to its path under the
+// version folder and runs the program, for an agent that needs a variable and cannot be given one (a
+// guest entry takes no env).
+func writeEnvLauncher(dir, command string, env map[string]string, program string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(env))
+	for k := range env {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	var set strings.Builder
+	for _, k := range names {
+		fmt.Fprintf(&set, "%s=\"$here/%s\"; export %s\n", k, env[k], k)
+	}
+	script := "#!/bin/sh\n" +
+		"# Starts " + command + " with the variables it needs, from the files beside this folder.\n" +
+		"here=$(cd \"$(dirname \"$0\")/..\" && pwd)\n" +
+		set.String() +
+		"exec \"$here/" + filepath.ToSlash(program) + "\" \"$@\"\n"
+	return os.WriteFile(filepath.Join(dir, command), []byte(script), 0o755)
 }
 
 // npmCPU is the guest's architecture as npm names it.
@@ -860,13 +925,13 @@ func (e *Entry) sandboxRefusal() string {
 	switch {
 	case e.Sandbox == nil:
 		return e.baseName() + " has no sandbox build yet."
-	case e.Sandbox.Unavailable != "":
-		return e.Sandbox.Unavailable
-	case e.Sandbox.SignIn == "login":
-		return e.baseName() + " signs in with an account login of its own, which the sandbox does not hold: use it on this computer."
 	}
 	return ""
 }
+
+// sandboxLoginNote is what a sandbox line of an agent that signs in with an account login of its own
+// says: the line installs and runs, and the login is the member's to do.
+const sandboxLoginNote = "It signs in with an account login of its own, which the sandbox does not do for you yet."
 
 // sandboxKeyNote is what a sandbox install of an agent that works with the member's
 // own key says before it is chosen: the agent runs, but their key does not reach it yet.

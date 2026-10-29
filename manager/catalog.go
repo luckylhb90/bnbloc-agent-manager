@@ -112,14 +112,12 @@ func (e *Entry) sandboxTwin() Entry {
 	t.Detect, t.Found, t.Update, t.InstallRun, t.InstallHint = Detect{}, nil, nil, nil, ""
 	t.Register = nil
 	sb := *e.Sandbox
-	if sb.Unavailable == "" {
-		if r := e.sandboxRegister(); r != nil {
-			rc := *r
-			rc.Name += sandboxTwinSuffix
-			t.Register = &rc
-		}
-		sb.Register = nil
+	if r := e.sandboxRegister(); r != nil {
+		rc := *r
+		rc.Name += sandboxTwinSuffix
+		t.Register = &rc
 	}
+	sb.Register = nil
 	t.Sandbox = &sb
 	return t
 }

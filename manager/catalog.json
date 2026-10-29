@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-29.5",
+  "version": "2026-10-29.6",
   "agents": [
     {
       "id": "claude",
@@ -31,7 +31,20 @@
       ],
       "signIn": "Run `claude` once and sign in.",
       "sandbox": {
-        "unavailable": "Claude Code signs in with your Claude account, which Anthropic allows only inside Claude Code itself. Use it on this computer; with an API key it can be offered once the sandbox can hold keys safely."
+        "method": "npm",
+        "package": "@agentclientprotocol/claude-agent-acp",
+        "bin": "claude-agent-acp",
+        "latest": "@agentclientprotocol/claude-agent-acp",
+        "approxMB": 360,
+        "signIn": "login",
+        "note": "The ACP adapter and the Claude Code it drives, installed for the sandbox's platform.",
+        "register": {
+          "name": "claude",
+          "profile": {
+            "instructionsVia": "meta",
+            "skillsDir": ".claude/skills"
+          }
+        }
       }
     },
     {
@@ -476,7 +489,22 @@
       },
       "signIn": "Run `pi`, then `/login` inside it.",
       "sandbox": {
-        "unavailable": "pi runs through a separate ACP adapter that needs pi itself beside it, and the sandbox install does not do that yet."
+        "method": "npm",
+        "package": "pi-acp",
+        "bin": "pi-acp",
+        "latest": "pi-acp",
+        "alsoInstall": [
+          "@earendil-works/pi-coding-agent"
+        ],
+        "launchEnv": {
+          "PI_ACP_PI_COMMAND": "node_modules/.bin/pi"
+        },
+        "approxMB": 160,
+        "signIn": "key",
+        "note": "pi and its ACP adapter, installed together for the sandbox's platform.",
+        "register": {
+          "name": "pi"
+        }
       }
     },
     {

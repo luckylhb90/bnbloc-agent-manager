@@ -631,7 +631,7 @@ func TestShippedCatalogInstallsHermesFromWheels(t *testing.T) {
 	if e.InstallHint != "" {
 		t.Errorf("the entry still tells the member to run an installer script: %q", e.InstallHint)
 	}
-	if e.Sandbox == nil || e.Sandbox.Unavailable != "" || e.Sandbox.method() != sandboxPip || e.sandboxRefusal() != "" {
+	if e.Sandbox == nil || e.Sandbox.method() != sandboxPip || e.sandboxRefusal() != "" {
 		t.Fatalf("sandbox = %+v (%q)", e.Sandbox, e.sandboxRefusal())
 	}
 	if guestCommand(e) != "$BNBLOC_MOUNT_AGENT_HERMES/bin/hermes" {
