@@ -174,7 +174,11 @@ agent before it ships.
 ```sh
 go test -race ./...
 go build -ldflags "-X main.version=0.1.0" -o dist/bnbloc-agent-manager-darwin-arm64 .   # GOOS/GOARCH per platform
-bnbloc components publish-package --package package.json --binary darwin-arm64=dist/... --rollout optin
+bnbloc components publish-package --package package.json --panel manager/page \
+  --binary darwin-arm64=dist/... --rollout optin
 ```
 
-The component installs software, so it ships `optin`.
+The component installs software, so it ships `optin`. Always pass `--panel manager/page`: a
+package published without its panel bundle has no Open button on the member's card (0.1.19), and a
+`bnbloc` older than the flag publishes it anyway without saying so; use one built from the platform's
+source.
