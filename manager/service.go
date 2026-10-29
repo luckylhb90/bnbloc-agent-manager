@@ -113,26 +113,32 @@ func (s *Service) Init() error {
 
 // dropSandboxRecordsOfTheComputerLine forgets a sandbox install recorded under the id of an agent's
 // computer line, which is how one was kept before an agent had a line for each place. There is no
-// migration (nothing is launched yet): the record goes, and the folder it names in the sandbox's store,
-// which nothing would show or remove any more, with it (a running room keeps its files: its tree is
-// made of hard links).
+// migration (nothing is launched yet): the record goes, and the folder it names in the sandbox's
+// store, which nothing would show or remove any more, with it. A room that still runs from it keeps
+// it: the same check as the remove button's (heldInSandbox), made again on every look at the
+// versions, so a conversation is never ended by this.
 func (s *Service) dropSandboxRecordsOfTheComputerLine() {
-	var drop []string
+	var drop []*Entry
 	s.mu.Lock()
 	for id, a := range s.state.Agents {
 		if e, ok := s.cat().Entry(id); ok && a != nil && a.Method == sandboxMethod && !e.isSandboxLine() {
-			drop = append(drop, id)
+			drop = append(drop, e)
 		}
 	}
 	s.mu.Unlock()
-	for _, id := range drop {
-		_ = s.mutate(func(st *State) { delete(st.Agents, id) })
-		if s.MountRoot != "" {
-			_ = os.RemoveAll(s.sandboxStore().agentDir(id))
+	forgot := false
+	for _, e := range drop {
+		if s.heldInSandbox(e) {
+			continue // a room runs from it: when it ends
 		}
-		log.Printf("agent-manager: forgot the sandbox install recorded under %q: the sandbox copy is its own line now (%s-sandbox); install it again there", id, id)
+		_ = s.mutate(func(st *State) { delete(st.Agents, e.ID) })
+		if s.MountRoot != "" {
+			_ = os.RemoveAll(s.sandboxStore().agentDir(e.ID))
+		}
+		forgot = true
+		log.Printf("agent-manager: forgot the sandbox install recorded under %q: the sandbox copy is its own line now (%s-sandbox); install it again there", e.ID, e.ID)
 	}
-	if len(drop) > 0 {
+	if forgot {
 		_ = s.writeRegistration()
 	}
 }
@@ -218,6 +224,7 @@ func (s *Service) Run(ctx context.Context) {
 		case <-check.C:
 			s.CheckAll(ctx)
 			s.gcAll() // versions a session held are released once it ends
+			s.dropSandboxRecordsOfTheComputerLine()
 			s.autoUpdate()
 			check.Reset(every)
 		}

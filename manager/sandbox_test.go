@@ -819,6 +819,7 @@ func TestAnOldSandboxRecordUnderTheComputerLinesIdIsForgotten(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	writeInUse(t, svc, time.Now(), true) // the core has said no room runs it
 	if err := svc.Init(); err != nil {
 		t.Fatal(err)
 	}
@@ -837,5 +838,31 @@ func TestAnOldSandboxRecordUnderTheComputerLinesIdIsForgotten(t *testing.T) {
 	}
 	if got, _ := svc.managedVersion("fake"); got != "1.0.0" {
 		t.Errorf("a computer install was forgotten: %q", got)
+	}
+}
+
+// A room that still runs from the old sandbox install keeps it: the record is forgotten when the
+// core says no room does, never before (the remove button's own check).
+func TestAnOldSandboxRecordIsKeptWhileARoomRunsFromIt(t *testing.T) {
+	fakeNPM(t)
+	reg := newSandboxRegistry(t)
+	reg.publish(t, "2.0.0")
+	svc := bothService(t, reg)
+	old := svc.sandboxStore().versionDir("fake", "2.0.0")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.mutate(func(st *State) { st.Agents["fake"] = &AgentState{Version: "2.0.0", Method: sandboxMethod, Registered: true} }); err != nil {
+		t.Fatal(err)
+	}
+	writeInUse(t, svc, time.Now(), false, "$BNBLOC_MOUNT_AGENT_FAKE/bin/tool")
+	svc.dropSandboxRecordsOfTheComputerLine()
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("the folder a room runs from was removed: %v", err)
+	}
+	writeInUse(t, svc, time.Now(), true) // no room runs it now
+	svc.dropSandboxRecordsOfTheComputerLine()
+	if _, err := os.Stat(svc.sandboxStore().agentDir("fake")); err == nil {
+		t.Error("once no room runs it the old folder goes")
 	}
 }
