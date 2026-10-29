@@ -105,7 +105,7 @@ func (s *Service) gc(id string) {
 	if state == inUseUnknown {
 		return
 	}
-	if s.placementOf(id) == PlaceSandbox {
+	if e, ok := s.cat().Entry(id); ok && e.isSandboxLine() {
 		return // its versions are pruned when it is updated
 	}
 	cur, prev := s.managedVersion(id)

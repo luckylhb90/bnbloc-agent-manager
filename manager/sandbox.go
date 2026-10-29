@@ -54,6 +54,9 @@ type SandboxInstall struct {
 	// Python is, for "pip", the guest's interpreter as major.minor (the image's
 	// own: the wheels are chosen for it).
 	Python string `json:"python,omitempty"`
+	// Release is, for "release", where the compiled program is published (release.go): the
+	// program is one executable per CPU, installed as <version>/bin/<Bin>.
+	Release *ReleaseInstall `json:"release,omitempty"`
 	// DataEnv is, for "pip", the variables the package reads to find its bundled
 	// data (a wheel's `.data/data` folder), each to a folder under it.
 	DataEnv map[string]string `json:"dataEnv,omitempty"`
@@ -91,6 +94,7 @@ const (
 	sandboxTarball = "tarball"
 	sandboxNPM     = "npm"
 	sandboxPip     = "pip"
+	sandboxRelease = "release"
 )
 
 func (in *SandboxInstall) method() string {
@@ -100,9 +104,9 @@ func (in *SandboxInstall) method() string {
 	return in.Method
 }
 
-// command is the name of the agent's command in the guest (pip).
+// command is the name of the agent's command in the guest (pip, release).
 func (in *SandboxInstall) command(e *Entry) string {
-	if in.Bin != "" {
+	if in.Bin != "" || e.Install == nil {
 		return in.Bin
 	}
 	return e.Install.Bin
@@ -162,8 +166,24 @@ func (in *SandboxInstall) validate(e *Entry) error {
 		if minor := minorOf(in.Python); minor < minorOf(e.Install.Python.Min) || (e.Install.Python.Max != "" && minor > minorOf(e.Install.Python.Max)) {
 			return fmt.Errorf("the guest's python %s is outside the package's range %s to %s", in.Python, e.Install.Python.Min, e.Install.Python.Max)
 		}
+	case sandboxRelease:
+		if in.Release == nil {
+			return errors.New("a release sandbox install needs sandbox.release")
+		}
+		if err := in.Release.validate(); err != nil {
+			return err
+		}
+		if !binRE.MatchString(in.Bin) {
+			return fmt.Errorf("sandbox.bin %q is not a command name", in.Bin)
+		}
+		if in.Package != "" || len(in.DataEnv) > 0 || in.Python != "" {
+			return errors.New("a release sandbox install takes no package, python or dataEnv")
+		}
 	default:
-		return fmt.Errorf("sandbox.method %q is not tarball, npm or pip", in.Method)
+		return fmt.Errorf("sandbox.method %q is not tarball, npm, pip or release", in.Method)
+	}
+	if in.Release != nil && in.method() != sandboxRelease {
+		return errors.New("sandbox.release belongs to the release method")
 	}
 	if in.SignIn != "" && in.SignIn != "key" && in.SignIn != "login" {
 		return fmt.Errorf("sandbox.signIn %q is not empty, key or login", in.SignIn)
@@ -171,7 +191,7 @@ func (in *SandboxInstall) validate(e *Entry) error {
 	if in.Latest != "" && !packageRE.MatchString(in.Latest) {
 		return fmt.Errorf("sandbox.latest %q is not an npm package name", in.Latest)
 	}
-	if e.sandboxPackage() == "" {
+	if in.method() != sandboxRelease && e.sandboxPackage() == "" {
 		return errors.New("a sandbox agent needs a package to read its version from (sandbox.latest, latest.package or install.package)")
 	}
 	if e.sandboxRegister() == nil {
@@ -217,25 +237,26 @@ func (s *Service) SandboxReady() bool {
 // <mount root>/agents/<id>/<version>.
 func (s *Service) sandboxStore() Store { return Store{Dir: s.MountRoot} }
 
+// sandboxMethod is the Method an install of a sandbox line records.
+const sandboxMethod = "sandbox"
+
 // PlaceSandbox and PlaceHost say where a managed install lives.
 const (
 	PlaceHost    = "host"
 	PlaceSandbox = "sandbox"
 )
 
-// placementOf is where the manager's install of the agent lives ("" when it
-// has none): recorded when it was installed, never guessed.
+// placementOf is where the manager's install of the agent lives ("" when it has
+// none). A line has one place: the sandbox line of an agent lives in the sandbox,
+// every other on this computer.
 func (s *Service) placementOf(id string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return placementIn(s.state.Agents[id])
-}
-
-func placementIn(a *AgentState) string {
-	switch {
-	case a == nil || a.Version == "":
+	a := s.state.Agents[id]
+	if a == nil || a.Version == "" {
 		return ""
-	case a.Method == "sandbox":
+	}
+	if e, ok := s.cat().Entry(id); ok && e.isSandboxLine() {
 		return PlaceSandbox
 	}
 	return PlaceHost
@@ -243,7 +264,7 @@ func placementIn(a *AgentState) string {
 
 // storeOf is where the versions of an agent live.
 func (s *Service) storeOf(e *Entry) Store {
-	if s.placementOf(e.ID) == PlaceSandbox {
+	if e.isSandboxLine() {
 		return s.sandboxStore()
 	}
 	return s.Store
@@ -277,7 +298,7 @@ func mountEnv(id string) string {
 // guestCommand is the agent's command line in the guest: the variable and the
 // program's path in the package.
 func guestCommand(e *Entry) string {
-	if e.Sandbox.method() == sandboxPip {
+	if e.Sandbox.method() == sandboxPip || e.Sandbox.method() == sandboxRelease {
 		return "$" + mountEnv(e.ID) + "/bin/" + e.Sandbox.command(e)
 	}
 	if e.Sandbox.method() == sandboxNPM {
@@ -371,6 +392,9 @@ func (s *Service) sandboxInstall(ctx context.Context, op *operation, e *Entry, v
 	}
 	if e.Sandbox.method() == sandboxPip {
 		return s.sandboxPipInstall(ctx, op, e, version)
+	}
+	if e.Sandbox.method() == sandboxRelease {
+		return s.sandboxReleaseInstall(ctx, op, e, version)
 	}
 	in := e.Sandbox
 	pkg := in.guestPackage()
@@ -590,7 +614,7 @@ func (s *Service) mountsDoc() []mountEntry {
 	for i := range s.cat().Agents {
 		e := &s.cat().Agents[i]
 		a := s.state.Agents[e.ID]
-		if e.Sandbox == nil || placementIn(a) != PlaceSandbox || !a.Registered || !s.Settings.Allows(e.ID) {
+		if !e.isSandboxLine() || a == nil || a.Version == "" || !a.Registered || !s.Settings.Allows(e.settingsID()) {
 			continue
 		}
 		out = append(out, mountEntry{
@@ -651,15 +675,14 @@ func (s *Service) installInSandbox(ctx context.Context, op *operation, e *Entry)
 	if e.Sandbox == nil {
 		return fmt.Errorf("%s cannot be put in the sandbox", e.Name)
 	}
+	if !e.isSandboxLine() {
+		return fmt.Errorf("%s is the line for this computer: its sandbox copy is %s-sandbox", e.Name, e.ID)
+	}
 	if why := e.sandboxRefusal(); why != "" {
 		return errors.New(why)
 	}
 	if cur, _ := s.managedVersion(e.ID); cur != "" {
-		where := "on this computer"
-		if s.placementOf(e.ID) == PlaceSandbox {
-			where = "in your sandbox"
-		}
-		return fmt.Errorf("%s %s is already installed %s; remove it first to put it somewhere else", e.Name, cur, where)
+		return fmt.Errorf("%s %s is already installed in your sandbox; use update", e.Name, cur)
 	}
 	v, err := s.targetIn(ctx, e, PlaceSandbox)
 	if err != nil {
@@ -671,7 +694,7 @@ func (s *Service) installInSandbox(ctx context.Context, op *operation, e *Entry)
 	}
 	return s.mutate(func(st *State) {
 		a := s.agentStateIn(st, e.ID)
-		a.Version, a.Previous, a.Method, a.InstalledAt = v, "", "sandbox", s.now()
+		a.Version, a.Previous, a.Method, a.InstalledAt = v, "", sandboxMethod, s.now()
 		a.Registered = true
 		a.Latest, a.CheckErr = v, ""
 	})
@@ -697,29 +720,11 @@ func (s *Service) updateInSandbox(ctx context.Context, op *operation, e *Entry, 
 	return nil
 }
 
-// copyOnThisComputer is the note for an agent the member has on this computer
-// that the manager did not install ("" when there is none). It does not stop the
-// sandbox copy: the manager writes one registration per agent, from where its own
-// install lives, so a room runs the sandbox copy while it is installed and the
-// member's copy is left exactly as it is (never started for a room, never
-// removed). When the sandbox copy is removed the agent is not registered at all
-// until the member enables one again. A same-named entry in the member's own
-// agents.json is another matter: it wins on the name (Shadowed), as for any agent.
-func (s *Service) copyOnThisComputer(e *Entry) string {
-	s.mu.Lock()
-	d := s.det[e.ID]
-	s.mu.Unlock()
-	if d.Command == "" {
-		return ""
-	}
-	return "The copy on this computer (" + d.Path + ") is left as it is; rooms use this one while it is installed."
-}
-
 // sandboxOnly reports an agent the organization offers only in the sandbox.
-func (s *Service) sandboxOnly(id string) bool {
+func (s *Service) sandboxOnly(e *Entry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.Settings.SandboxOnly[id]
+	return s.Settings.SandboxOnly[e.settingsID()]
 }
 
 // minNPMForPlatformFlags is the npm that honours --libc beside --os and --cpu:
@@ -854,11 +859,11 @@ func (e *Entry) sandboxRegister() *Register {
 func (e *Entry) sandboxRefusal() string {
 	switch {
 	case e.Sandbox == nil:
-		return e.Name + " has no sandbox build yet."
+		return e.baseName() + " has no sandbox build yet."
 	case e.Sandbox.Unavailable != "":
 		return e.Sandbox.Unavailable
 	case e.Sandbox.SignIn == "login":
-		return e.Name + " signs in with an account login of its own, which the sandbox does not hold: use it on this computer."
+		return e.baseName() + " signs in with an account login of its own, which the sandbox does not hold: use it on this computer."
 	}
 	return ""
 }

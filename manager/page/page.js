@@ -44,9 +44,6 @@ function h(tag, props, ...kids) {
 const mb = (n) => n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + " GB" : Math.max(1, Math.round(n / (1 << 20))) + " MB";
 
 let snap = null, confirming = null, actionError = {}, timer = null;
-// The place the member picked for an agent not installed yet (host or sandbox).
-const picked = {};
-
 async function act(id, action) {
   confirming = null; delete actionError[id];
   try { await api("POST", "/v1/agents/" + id + "/" + action); } catch (e) { actionError[id] = e.message; }
@@ -59,7 +56,7 @@ function chip(a) {
   if (a.status === "unsupported") return h("span", { class: "chip" }, "Not for this system");
   if (a.status === "blocked") return h("span", { class: "chip warn" }, "Not offered");
   if (op && op.error) return h("span", { class: "chip bad" }, "Failed");
-  if (a.status === "absent") return h("span", { class: "chip" }, "Not installed");
+  if (a.status === "absent") return h("span", { class: "chip" }, a.sandbox ? "Not in your sandbox" : "Not installed");
   const v = a.managed ? a.managed.version : a.external && a.external.version;
   if (a.updateAvailable) return h("span", { class: "chip warn" }, (v ? v + " → " : "Update ") + a.target);
   if (a.updateUnknown) return h("span", { class: "chip" }, v ? "Installed " + v : "Installed");
@@ -70,7 +67,7 @@ function chip(a) {
 function detail(a) {
   const bits = [];
   if (a.managed) {
-    bits.push((a.sandbox ? "In your sandbox, not on this computer" : "Managed here") + " · " + mb(a.managed.sizeBytes));
+    bits.push((a.sandbox ? "In your sandbox, nothing of it on this computer" : "Managed here") + " · " + mb(a.managed.sizeBytes));
     if (a.managed.previous) bits.push("earlier version " + a.managed.previous + " kept");
     if (a.managed.held && a.managed.held.length) bits.push("kept for a room still using " + a.managed.held.join(", ") + " (removed when it no longer needs it)");
     if (a.pinned) bits.push("pinned by your organization to " + a.pinned);
@@ -79,6 +76,8 @@ function detail(a) {
     bits.push("Found on this computer" + (k && k !== "unknown" ? " (" + k.replace("-", " ") + ")" : "") + ": " + a.external.path);
     if (a.pinned) bits.push("pinned by your organization to " + a.pinned);
   }
+  if (a.sandbox && !a.managed && a.approxMB) bits.push("about " + a.approxMB + " MB, shared by every room");
+  if (a.sandbox && a.note) bits.push(a.note);
   if (a.source) bits.push("added by " + a.source);
   if (a.checkError && a.status === "installed") bits.push("couldn’t look for a newer version: " + a.checkError);
   return bits.length ? h("div", { class: "detail" }, bits.join(" · ")) : null;
@@ -88,14 +87,11 @@ function card(a) {
   const busy = a.op && a.op.running;
   const btns = [];
   const add = (label, action, primary) => btns.push(h("button", { class: primary ? "primary" : "", onclick: () => act(a.id, action) }, label));
-  // Where to install: one choice, the same for every agent. Each place is offered,
-  // or greyed out with its reason; nothing is hidden.
-  const places = a.placements || [];
-  if (places.length) {
-    const on = places.filter((p) => p.can);
-    if (!picked[a.id] || !on.some((p) => p.id === picked[a.id])) picked[a.id] = (on[0] || {}).id;
+  if (a.can.install) {
+    if (a.installCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id + ":install"; render(); } }, "Install on this computer"));
+    else add("Install on this computer", "install", true);
   }
-
+  if (a.can.installSandbox) add("Install in my sandbox", "install-sandbox", true);
   if (a.can.update) {
     if (a.external && a.updateCommand) btns.push(h("button", { class: "primary", onclick: () => { confirming = a.id; render(); } }, a.updateUnknown ? "Run its updater" : "Update"));
     else add("Update", "update", true);
@@ -115,9 +111,6 @@ function card(a) {
     body.push(h("div", { class: "hint" }, a.adapter ? "Rooms run it through the ACP adapter below." : "Kept current here; rooms can’t run it yet (no ACP launch line)."));
   }
   body.push(detail(a));
-  // An agent already on this computer with nothing to choose has no block: it would be
-  // two greyed-out lines on every installed row.
-  if (places.length && !busy && (places.some((p) => p.can) || a.status === "absent")) body.push(whereToInstall(a, places));
   if (confirming === a.id + ":install") {
     body.push(h("div", { class: "hint" }, "This runs on your computer:",
       h("code", { class: "cmd" }, a.installCommand),
@@ -128,32 +121,12 @@ function card(a) {
       h("code", { class: "cmd" }, a.updateCommand),
       h("button", { class: "primary", onclick: () => act(a.id, "update") }, "Run"), " ", h("button", { onclick: () => { confirming = null; render(); } }, "Cancel")));
   }
-  if (a.reason && !(a.can.install || a.can.update) && !places.length && a.status !== "unsupported") body.push(h("div", { class: "hint" }, a.reason));
+  if (a.reason && !(a.can.install || a.can.installSandbox || a.can.update) && a.status !== "unsupported") body.push(h("div", { class: "hint" }, a.reason));
   if (a.status === "installed" && a.signIn && a.managed && !busy) body.push(h("div", { class: "hint" }, a.signIn));
   if (actionError[a.id]) body.push(h("div", { class: "err" }, actionError[a.id]));
   if (a.op && a.op.error && !busy) body.push(h("div", { class: "err" }, a.op.error));
   if (a.op && a.op.log && a.op.log.length) body.push(h("details", { open: busy || !!a.op.error }, h("summary", {}, busy ? "Progress" : "Last operation"), h("pre", {}, a.op.log.join("\n"))));
-  return h("div", { class: a.for ? "card sub" : "card", id: "a-" + a.id }, body);
-}
-
-// whereToInstall is the choice of place for an agent the manager has not
-// installed: This computer or My sandbox, each with what it means or why it is off,
-// and one button that does the chosen one.
-function whereToInstall(a, places) {
-  const chosen = picked[a.id];
-  const can = places.some((p) => p.can);
-  const opts = places.map((p) => h("label", { class: "opt" + (p.can ? "" : " off") },
-    h("input", { type: "radio", name: "where-" + a.id, value: p.id, checked: p.id === chosen, disabled: !p.can, onchange: () => { picked[a.id] = p.id; render(); } }),
-    h("div", {}, h("div", { class: "lab" }, p.label), p.can ? (p.note ? h("div", { class: "why" }, p.note) : null) : h("div", { class: "why" }, p.reason || "Not available."))));
-  const run = () => {
-    const p = places.find((x) => x.id === chosen);
-    if (!p) return;
-    if (p.id === "host" && a.installCommand) { confirming = a.id + ":install"; render(); return; }
-    act(a.id, p.id === "sandbox" ? "install-sandbox" : "install");
-  };
-  const label = chosen === "sandbox" ? "Install in my sandbox" : chosen === "host" ? "Install on this computer" : "Install";
-  return h("div", { class: "where" }, h("div", { class: "title" }, "Where to install"), opts,
-    can ? h("div", { class: "go" }, h("button", { class: "primary", onclick: run }, label)) : null);
+  return h("div", { class: a.for || a.sandboxOf ? "card sub" : "card", id: "a-" + a.id }, body);
 }
 
 function render() {
@@ -162,7 +135,8 @@ function render() {
   $("notes").replaceChildren(...(snap.notes || []).map((n) => h("div", { class: "notes" }, n)));
   const shown = snap.agents.filter((a) => a.status !== "unsupported");
   // An adapter row follows the agent it serves.
-  const ordered = shown.filter((a) => !a.for).flatMap((a) => [a, ...shown.filter((c) => c.for === a.id)]);
+  // A sandbox line follows its agent, and an adapter follows the line it serves.
+  const ordered = shown.filter((a) => !a.for && !a.sandboxOf).flatMap((a) => [a, ...shown.filter((c) => c.sandboxOf === a.id), ...shown.filter((c) => c.for === a.id)]);
   $("list").replaceChildren(...ordered.map(card));
   for (const d of document.querySelectorAll(".card")) if (openLogs.has(d.id)) { const x = d.querySelector("details"); if (x) x.open = true; }
   const s = snap.settings;

@@ -212,8 +212,8 @@ func TestASandboxAgentIsOfferedOnlyWhereTheDesktopGaveItTheSandboxFolders(t *tes
 	if v.Can.InstallSandbox {
 		t.Errorf("without the sandbox's folders the sandbox cannot be chosen: %+v", v.Can)
 	}
-	if pl := placementOf(v, PlaceSandbox); pl == nil || pl.Can || !strings.Contains(pl.Reason, "sandbox") {
-		t.Errorf("and the row says why: %+v", v.Placements)
+	if !strings.Contains(v.Reason, "sandbox") {
+		t.Errorf("and the row says why: %q", v.Reason)
 	}
 	if err := do(t, svc, "sbx", ActInstallSandbox); err == nil {
 		t.Error("an install without the sandbox's folders must fail, not fall back to this computer")
@@ -395,53 +395,50 @@ func bothService(t *testing.T, reg *sandboxRegistry) *Service {
 	return svc
 }
 
-func TestTheMemberChoosesWhereAnAgentIsInstalledAndTheChoiceIsFollowed(t *testing.T) {
+// An agent that runs on this computer and can live in the sandbox has two lines, each with its own
+// state, store folder and registration: installing, updating or removing one never touches the other.
+// (A member who put Hermes in the sandbox could no longer see the Hermes already on their computer:
+// one row showed one install and hid the other, and one registration meant they could not be used
+// side by side.)
+func TestAnAgentHasAComputerLineAndASandboxLineThatDoNotTouchEachOther(t *testing.T) {
 	fakeNPM(t)
 	reg := newSandboxRegistry(t)
 	reg.publish(t, "2.0.0")
 	svc := bothService(t, reg)
 
-	v := view(svc, "fake")
-	if h, sb := placementOf(v, PlaceHost), placementOf(v, PlaceSandbox); h == nil || sb == nil || !h.Can || !sb.Can || !strings.Contains(sb.Note, "7 MB") || !strings.Contains(sb.Note, "the new generation") {
-		t.Fatalf("both places are offered on the row, the sandbox one with what it is: %+v", v.Placements)
+	host, sb := view(svc, "fake"), view(svc, "fake-sandbox")
+	if host.Sandbox || !sb.Sandbox || sb.SandboxOf != "fake" || sb.Name != "Fake Agent (sandbox)" {
+		t.Fatalf("two lines: %+v / %+v", host, sb)
 	}
-	if !v.Can.Install || !v.Can.InstallSandbox || v.SandboxOffer == nil || v.SandboxOffer.ApproxMB != 7 || v.SandboxOffer.Note != "the new generation" {
-		t.Fatalf("both places are offered, with what the sandbox one is: %+v", v)
+	if !host.Can.Install || host.Can.InstallSandbox || !sb.Can.InstallSandbox || sb.Can.Install {
+		t.Fatalf("each line offers its own install only: host %+v, sandbox %+v", host.Can, sb.Can)
+	}
+	if sb.ApproxMB != 7 || !strings.Contains(sb.Note, "the new generation") {
+		t.Errorf("the sandbox line says what it is: %d MB %q", sb.ApproxMB, sb.Note)
 	}
 
-	// The sandbox.
-	if err := do(t, svc, "fake", ActInstallSandbox); err != nil {
+	// The sandbox line.
+	if err := do(t, svc, "fake-sandbox", ActInstallSandbox); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.placementOf("fake"); got != PlaceSandbox {
+	if got := svc.placementOf("fake-sandbox"); got != PlaceSandbox {
 		t.Fatalf("placement %q", got)
 	}
-	v = view(svc, "fake")
-	if v.SignIn != sandboxSignIn {
-		t.Errorf("the host's sign-in line does not apply in the sandbox: %q", v.SignIn)
+	if got := svc.placementOf("fake"); got != "" {
+		t.Fatalf("the computer line has nothing installed, placement %q", got)
 	}
-	if !v.Sandbox || v.Can.Install || v.Can.InstallSandbox || v.Managed == nil || v.Managed.Version != "2.0.0" {
-		t.Errorf("once installed in the sandbox, neither install is offered: %+v", v)
+	sb, host = view(svc, "fake-sandbox"), view(svc, "fake")
+	if sb.SignIn != sandboxSignIn || sb.Managed == nil || sb.Managed.Version != "2.0.0" || sb.Can.InstallSandbox {
+		t.Errorf("the sandbox line is installed: %+v", sb)
 	}
-	if d, ok := readDropIn(t, svc); !ok || len(d.Agents) != 1 || d.Agents[0].Command != "$BNBLOC_MOUNT_AGENT_FAKE/bin/tool" {
-		t.Errorf("rooms get the guest agent: %+v", d)
+	if host.Managed != nil || !host.Can.Install {
+		t.Errorf("and the computer line is untouched, still installable: %+v", host)
 	}
-	// Installing on this computer too is refused, naming where it is.
-	if err := do(t, svc, "fake", ActInstall); err == nil || !strings.Contains(err.Error(), "in your sandbox") {
-		t.Errorf("a second place: %v", err)
+	if d, ok := readDropIn(t, svc); !ok || len(d.Agents) != 1 || d.Agents[0].Name != "fake-sandbox" || d.Agents[0].Command != "$BNBLOC_MOUNT_AGENT_FAKE_SANDBOX/bin/tool" {
+		t.Errorf("rooms get the guest agent under its own name: %+v", d)
 	}
-	// It moves by removing it and installing again: the files go, the mount goes,
-	// and the host install that follows is registered as a host command.
-	writeInUse(t, svc, time.Now(), true) // the core has said no room runs it
-	if err := do(t, svc, "fake", ActRemove); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(svc.sandboxStore().agentDir("fake")); err == nil {
-		t.Error("the sandbox copy is removed from the sandbox's folder")
-	}
-	if ms := readMounts(t, svc); len(ms) != 0 {
-		t.Errorf("mounts after the remove: %+v", ms)
-	}
+
+	// The computer line too, beside it: both reach rooms, each under its own name.
 	if err := do(t, svc, "fake", ActInstall); err != nil {
 		t.Fatal(err)
 	}
@@ -449,15 +446,41 @@ func TestTheMemberChoosesWhereAnAgentIsInstalledAndTheChoiceIsFollowed(t *testin
 		t.Fatalf("placement %q", got)
 	}
 	d, _ := readDropIn(t, svc)
-	raw, _ := os.ReadFile(filepath.Join(svc.ACPHome, DropInDir, DropInFile))
-	if len(d.Agents) != 1 || strings.Contains(d.Agents[0].Command, "BNBLOC_MOUNT") || strings.Contains(string(raw), `"sandbox"`) {
-		t.Errorf("a host install is a host command: %s", raw)
+	names := map[string]string{}
+	for _, a := range d.Agents {
+		names[a.Name] = a.Command
 	}
-	if err := do(t, svc, "fake", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "on this computer") {
-		t.Errorf("a second place: %v", err)
+	if len(names) != 2 || !strings.Contains(names["fake-sandbox"], "BNBLOC_MOUNT") || strings.Contains(names["fake"], "BNBLOC_MOUNT") || names["fake"] == "" {
+		t.Fatalf("a host command and a guest command, side by side: %+v", d)
+	}
+	if ms := readMounts(t, svc); len(ms) != 1 || !strings.Contains(ms[0].Env, "FAKE_SANDBOX") {
+		t.Errorf("the sandbox gets only its own line's folder: %+v", ms)
+	}
+
+	// Removing one leaves the other, and its registration.
+	writeInUse(t, svc, time.Now(), true)
+	if err := do(t, svc, "fake-sandbox", ActRemove); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(svc.sandboxStore().agentDir("fake-sandbox")); err == nil {
+		t.Error("the sandbox copy is removed from the sandbox's folder")
+	}
+	if _, err := os.Stat(svc.Store.agentDir("fake")); err != nil {
+		t.Errorf("the computer copy is still there: %v", err)
 	}
 	if ms := readMounts(t, svc); len(ms) != 0 {
-		t.Errorf("a host install gives the sandbox nothing: %+v", ms)
+		t.Errorf("mounts after the remove: %+v", ms)
+	}
+	d, _ = readDropIn(t, svc)
+	if len(d.Agents) != 1 || d.Agents[0].Name != "fake" {
+		t.Errorf("the computer line is still registered under its own name: %+v", d)
+	}
+	// An install on the wrong line is refused, naming the right place.
+	if err := do(t, svc, "fake-sandbox", ActInstall); err == nil || !strings.Contains(err.Error(), "sandbox") {
+		t.Errorf("a computer install of the sandbox line: %v", err)
+	}
+	if err := do(t, svc, "fake", ActInstallSandbox); err == nil {
+		t.Errorf("a sandbox install of the computer line was accepted")
 	}
 }
 
@@ -467,17 +490,17 @@ func TestAnOrganizationCanOfferAnAgentOnlyInTheSandbox(t *testing.T) {
 	reg.publish(t, "2.0.0")
 	svc := bothService(t, reg)
 	svc.Settings.SandboxOnly = map[string]bool{"fake": true}
-	v := view(svc, "fake")
-	if h := placementOf(v, PlaceHost); h == nil || h.Can || !strings.Contains(h.Reason, "only in the sandbox") {
-		t.Fatalf("the host place is disabled and says why: %+v", v.Placements)
+	host, sb := view(svc, "fake"), view(svc, "fake-sandbox")
+	if host.Can.Install || !strings.Contains(host.Reason, "only in the sandbox") {
+		t.Fatalf("the computer line is off and says why: %+v", host)
 	}
-	if v.Can.Install || !v.Can.InstallSandbox || !v.SandboxOffer.Only {
-		t.Fatalf("only the sandbox is offered: %+v", v)
+	if !sb.Can.InstallSandbox {
+		t.Fatalf("the sandbox line is offered: %+v", sb)
 	}
 	if err := do(t, svc, "fake", ActInstall); err == nil || !strings.Contains(err.Error(), "only in the sandbox") {
 		t.Errorf("the host install is refused, not just hidden: %v", err)
 	}
-	if err := do(t, svc, "fake", ActInstallSandbox); err != nil {
+	if err := do(t, svc, "fake-sandbox", ActInstallSandbox); err != nil {
 		t.Errorf("the sandbox install works: %v", err)
 	}
 }
@@ -503,14 +526,14 @@ func TestTheNewestVersionIsLookedForWhereTheAgentLives(t *testing.T) {
 	reg := newSandboxRegistry(t)
 	reg.publish(t, "2.0.0")
 	svc := bothService(t, reg)
-	if err := do(t, svc, "fake", ActInstallSandbox); err != nil {
+	if err := do(t, svc, "fake-sandbox", ActInstallSandbox); err != nil {
 		t.Fatal(err)
 	}
 	reg.publish(t, "2.1.0")
-	if err := do(t, svc, "fake", ActCheck); err != nil {
+	if err := do(t, svc, "fake-sandbox", ActCheck); err != nil {
 		t.Fatal(err)
 	}
-	if v := view(svc, "fake"); !v.UpdateAvailable || v.Target != "2.1.0" {
+	if v := view(svc, "fake-sandbox"); !v.UpdateAvailable || v.Target != "2.1.0" {
 		t.Errorf("the sandbox install is checked against the sandbox's package (the host one is not even in this registry): %+v", v)
 	}
 }
@@ -562,6 +585,19 @@ chmod 700 "$prefix/node_modules/$pkg"
 	return log
 }
 
+// setSandbox changes the sandbox block of an agent and of its sandbox line (a catalog is read once,
+// the line is made from the agent: a test that edits the agent afterwards edits both).
+func setSandbox(svc *Service, id string, f func(*SandboxInstall)) {
+	for i := range svc.Catalog.Agents {
+		if e := &svc.Catalog.Agents[i]; e.ID == id || e.SandboxOf == id {
+			sb := *e.Sandbox
+			f(&sb)
+			e.Sandbox = &sb
+		}
+	}
+	svc.eff.Store(nil)
+}
+
 func npmSandboxService(t *testing.T) *Service {
 	t.Helper()
 	reg := newSandboxRegistry(t)
@@ -579,7 +615,7 @@ func TestAnAgentWithDependenciesIsInstalledForTheGuestsPlatformWithoutRunningASc
 	log := fakeCrossNPM(t, "11.9.0")
 	svc := npmSandboxService(t)
 	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"} // the registry here has no such package; the pin names the version
-	if err := do(t, svc, "dep", ActInstallSandbox); err != nil {
+	if err := do(t, svc, "dep-sandbox", ActInstallSandbox); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(log)
@@ -588,7 +624,7 @@ func TestAnAgentWithDependenciesIsInstalledForTheGuestsPlatformWithoutRunningASc
 			t.Errorf("npm was run as %q, want %s", strings.TrimSpace(string(raw)), want)
 		}
 	}
-	dir := svc.sandboxStore().versionDir("dep", "3.1.4")
+	dir := svc.sandboxStore().versionDir("dep-sandbox", "3.1.4")
 	if fi, err := os.Stat(filepath.Join(dir, "node_modules", "dep-agent", "cli.js")); err != nil || fi.Mode().Perm() != 0o644 {
 		t.Errorf("a file the guest's user must read is 0644 (npm left 0600): %v %v", fi, err)
 	}
@@ -600,7 +636,7 @@ func TestAnAgentWithDependenciesIsInstalledForTheGuestsPlatformWithoutRunningASc
 	}
 	_ = svc.WriteRegistration()
 	d, _ := readDropIn(t, svc)
-	if len(d.Agents) != 1 || d.Agents[0].Command != "$BNBLOC_MOUNT_AGENT_DEP/node_modules/.bin/depagent" || strings.Join(d.Agents[0].Args, " ") != "--acp" {
+	if len(d.Agents) != 1 || d.Agents[0].Command != "$BNBLOC_MOUNT_AGENT_DEP_SANDBOX/node_modules/.bin/depagent" || strings.Join(d.Agents[0].Args, " ") != "--acp" {
 		t.Errorf("rooms launch it through the guest's node_modules/.bin: %+v", d)
 	}
 	if ms := readMounts(t, svc); len(ms) != 1 || ms[0].Host != dir {
@@ -612,7 +648,7 @@ func TestAnOldNpmThatWouldInstallThisComputersPlatformIsRefused(t *testing.T) {
 	log := fakeCrossNPM(t, "10.2.0")
 	svc := npmSandboxService(t)
 	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
-	err := do(t, svc, "dep", ActInstallSandbox)
+	err := do(t, svc, "dep-sandbox", ActInstallSandbox)
 	if err == nil || !strings.Contains(err.Error(), "npm 10.5.0 or newer") {
 		t.Fatalf("an npm without --libc: %v", err)
 	}
@@ -625,12 +661,11 @@ func TestAPackageThatNamesAnotherVersionOrNoCommandIsNotInstalled(t *testing.T) 
 	fakeCrossNPM(t, "11.9.0")
 	svc := npmSandboxService(t)
 	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
-	svc.Catalog.Agents[0].Sandbox.Bin = "nosuchcommand"
-	svc.eff.Store(nil)
-	if err := do(t, svc, "dep", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "nosuchcommand") {
+	setSandbox(svc, "dep", func(sb *SandboxInstall) { sb.Bin = "nosuchcommand" })
+	if err := do(t, svc, "dep-sandbox", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "nosuchcommand") {
 		t.Fatalf("a missing command: %v", err)
 	}
-	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep")); len(entries) != 0 {
+	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep-sandbox")); len(entries) != 0 {
 		t.Errorf("a failed install leaves nothing behind: %v", entries)
 	}
 }
@@ -638,18 +673,16 @@ func TestAPackageThatNamesAnotherVersionOrNoCommandIsNotInstalled(t *testing.T) 
 func TestAnAgentThatNeedsAKeyTheSandboxCannotTakeIsOfferedAndSaysWhatIsMissing(t *testing.T) {
 	fakeCrossNPM(t, "11.9.0")
 	svc := npmSandboxService(t)
-	svc.Catalog.Agents[0].Sandbox.SignIn = "key"
-	svc.eff.Store(nil)
+	setSandbox(svc, "dep", func(sb *SandboxInstall) { sb.SignIn = "key" })
 	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
-	v := view(svc, "dep")
-	sb := placementOf(v, PlaceSandbox)
-	if sb == nil || !sb.Can || !strings.Contains(sb.Note, "API key cannot be used in the sandbox yet") {
-		t.Fatalf("the sandbox place is on and says what is missing: %+v", v.Placements)
+	v := view(svc, "dep-sandbox")
+	if !v.Can.InstallSandbox || !strings.Contains(v.Note, "API key cannot be used in the sandbox yet") {
+		t.Fatalf("the sandbox line is on and says what is missing: %+v", v)
 	}
-	if !v.Can.InstallSandbox || !v.Can.Install {
-		t.Fatalf("both places can be chosen: %+v", v.Can)
+	if !view(svc, "dep").Can.Install {
+		t.Fatalf("the computer line is offered too")
 	}
-	if err := do(t, svc, "dep", ActInstallSandbox); err != nil {
+	if err := do(t, svc, "dep-sandbox", ActInstallSandbox); err != nil {
 		t.Fatalf("it installs: %v", err)
 	}
 }
@@ -657,20 +690,19 @@ func TestAnAgentThatNeedsAKeyTheSandboxCannotTakeIsOfferedAndSaysWhatIsMissing(t
 func TestAnAgentWhoseOnlyWayInIsAnAccountLoginIsNotOfferedInTheSandbox(t *testing.T) {
 	fakeCrossNPM(t, "11.9.0")
 	svc := npmSandboxService(t)
-	svc.Catalog.Agents[0].Sandbox.SignIn = "login"
-	svc.eff.Store(nil)
+	setSandbox(svc, "dep", func(sb *SandboxInstall) { sb.SignIn = "login" })
 	svc.Settings.Pinned = map[string]string{"dep": "3.1.4"}
-	v := view(svc, "dep")
-	if sb := placementOf(v, PlaceSandbox); sb == nil || sb.Can || !strings.Contains(sb.Reason, "account login") {
-		t.Fatalf("the sandbox place is off and says why: %+v", v.Placements)
+	v := view(svc, "dep-sandbox")
+	if v.Can.InstallSandbox || !strings.Contains(v.Reason, "account login") {
+		t.Fatalf("the sandbox line is off and says why: %+v", v)
 	}
-	if v.Can.InstallSandbox || !v.Can.Install {
-		t.Fatalf("the host install stays: %+v", v.Can)
+	if !view(svc, "dep").Can.Install {
+		t.Fatalf("the computer line stays")
 	}
-	if err := do(t, svc, "dep", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "account login") {
+	if err := do(t, svc, "dep-sandbox", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "account login") {
 		t.Errorf("refused, not just hidden: %v", err)
 	}
-	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep")); len(entries) != 0 {
+	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("dep-sandbox")); len(entries) != 0 {
 		t.Errorf("nothing was installed: %v", entries)
 	}
 	if _, err := ParseCatalog([]byte(`{"version":"x","agents":[{"id":"a","name":"A","install":{"method":"npm","package":"a","bin":"a"},"sandbox":{"method":"npm","bin":"a","signIn":"sometimes"},"latest":{"from":"npm"},"detect":{"command":"a"},"register":{"name":"a"}}]}`)); err == nil {
@@ -678,19 +710,10 @@ func TestAnAgentWhoseOnlyWayInIsAnAccountLoginIsNotOfferedInTheSandbox(t *testin
 	}
 }
 
-func placementOf(v AgentView, id string) *PlacementView {
-	for i := range v.Placements {
-		if v.Placements[i].ID == id {
-			return &v.Placements[i]
-		}
-	}
-	return nil
-}
-
-// The same two places on every agent row of the real catalog, each enabled or
-// disabled with a reason; never a row with one and not the other, never a disabled
-// place without its reason.
-func TestEveryAgentOfTheCatalogOffersTheSamePlacesAndSaysWhyOneIsOff(t *testing.T) {
+// Every agent of the real catalog that runs on this computer and can be put in the sandbox has the
+// two lines, the sandbox one right after it; one that cannot has a reason on its sandbox line or
+// none at all. Never a sandbox line without a reason for being off.
+func TestEveryAgentOfTheCatalogHasItsTwoLinesAndSaysWhyOneIsOff(t *testing.T) {
 	cat, err := DefaultCatalog()
 	if err != nil {
 		t.Fatal(err)
@@ -699,49 +722,41 @@ func TestEveryAgentOfTheCatalogOffersTheSamePlacesAndSaysWhyOneIsOff(t *testing.
 	svc := sandboxService(t, reg)
 	svc.Catalog = cat
 	svc.eff.Store(nil)
-	for _, a := range svc.Snapshot().Agents {
-		if a.For != "" || a.Status == "unsupported" || a.Status == "blocked" {
-			continue
-		}
-		h, sb := placementOf(a, PlaceHost), placementOf(a, PlaceSandbox)
-		if a.Managed != nil || (a.Status == "installed" && a.External != nil && h == nil) {
-			continue
-		}
-		if h == nil || sb == nil {
-			t.Errorf("%s: the row does not carry both places: %+v", a.ID, a.Placements)
-			continue
-		}
-		for _, p := range []*PlacementView{h, sb} {
-			if !p.Can && p.Reason == "" {
-				t.Errorf("%s: %s is off with no reason", a.ID, p.ID)
+	rows := svc.Snapshot().Agents
+	index := map[string]int{}
+	for i, a := range rows {
+		index[a.ID] = i
+	}
+	for _, a := range rows {
+		if a.Sandbox && a.SandboxOf != "" {
+			if i, ok := index[a.SandboxOf]; !ok || index[a.ID] != i+1 {
+				t.Errorf("%s is not right after %s", a.ID, a.SandboxOf)
 			}
-			if p.Can && p.Reason != "" {
-				t.Errorf("%s: %s is on and carries a reason: %q", a.ID, p.ID, p.Reason)
+			if !a.Can.InstallSandbox && a.Managed == nil && a.Reason == "" {
+				t.Errorf("%s is off with no reason", a.ID)
+			}
+			if a.Can.Install {
+				t.Errorf("%s offers a computer install", a.ID)
 			}
 		}
 	}
-	// OpenCode 1.x and OpenCode 2 are two products: two rows, and 1.x is not
-	// offered in the sandbox.
-	var ids []string
-	for _, a := range svc.Snapshot().Agents {
-		ids = append(ids, a.ID)
+	// OpenCode 1.x and OpenCode 2 are two products. OpenCode 2 has no side on this computer: one
+	// line, in the sandbox, and no twin.
+	if _, ok := index["opencode2"]; !ok || index["opencode2-sandbox"] != 0 {
+		t.Errorf("OpenCode 2 is one line: %v", index)
 	}
-	if !strings.Contains(strings.Join(ids, " "), "opencode opencode2") {
-		t.Errorf("OpenCode 2 is a row of its own beside OpenCode: %v", ids)
+	if _, ok := index["opencode-sandbox"]; !ok {
+		t.Errorf("OpenCode 1.x has a sandbox line: %v", index)
 	}
-	if e, _ := cat.Entry("opencode"); e.sandboxRefusal() != "" || e.Install == nil {
-		t.Errorf("OpenCode 1.x is installable on this computer and in the sandbox: %q", e.sandboxRefusal())
-	}
-	if e, _ := cat.Entry("opencode2"); e.sandboxRefusal() != "" || e.Install != nil {
+	if e, _ := cat.Entry("opencode2"); e.sandboxRefusal() != "" || e.Install != nil || !e.isSandboxLine() {
 		t.Error("OpenCode 2 is a sandbox agent and is offered there")
 	}
 }
 
-// A copy the member installed themselves does not stop the sandbox copy. The manager
-// writes one registration per agent, from where its own install lives: while the
-// sandbox copy is installed the drop-in holds only the guest command (never the host
-// copy's, so a room believed isolated never runs on this computer), the host copy is
-// left exactly as it is, and with the sandbox copy removed nothing is registered.
+// A copy the member installed themselves does not stop the sandbox copy, and the two are used side
+// by side: the computer's copy stays registered under its own name while the sandbox line is
+// installed (it used to be dropped from the ACP core's list for as long as the sandbox copy lived),
+// and neither is ever touched by the other's install or remove.
 func TestAnAgentAlreadyOnThisComputerCanAlsoBePutInTheSandbox(t *testing.T) {
 	fakeNPM(t)
 	reg := newSandboxRegistry(t)
@@ -750,30 +765,77 @@ func TestAnAgentAlreadyOnThisComputerCanAlsoBePutInTheSandbox(t *testing.T) {
 	hostCmd := foundAgent(t, "fakeagent", "somebin", "1.0.0")
 	svc.RefreshDetected(context.Background())
 
-	v := view(svc, "fake")
-	sb := placementOf(v, PlaceSandbox)
-	if !v.Can.InstallSandbox || sb == nil || !sb.Can || !strings.Contains(sb.Note, "is left as it is") {
-		t.Fatalf("the sandbox is offered and says the copy stays: can %+v placement %+v", v.Can, sb)
+	host, sb := view(svc, "fake"), view(svc, "fake-sandbox")
+	if host.External == nil || host.External.Version != "1.0.0" {
+		t.Fatalf("the member's copy is shown on its own line: %+v", host)
 	}
-	if err := do(t, svc, "fake", ActInstallSandbox); err != nil {
+	if sb.External != nil || !sb.Can.InstallSandbox {
+		t.Fatalf("the sandbox line never shows the computer's copy and is offered: %+v", sb)
+	}
+	if err := do(t, svc, "fake", ActRegister); err != nil {
+		t.Fatalf("use the member's copy in rooms: %v", err)
+	}
+	if err := do(t, svc, "fake-sandbox", ActInstallSandbox); err != nil {
 		t.Fatalf("install in the sandbox: %v", err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(svc.ACPHome, DropInDir, DropInFile))
 	d, _ := readDropIn(t, svc)
-	if len(d.Agents) != 1 || !strings.Contains(d.Agents[0].Command, "BNBLOC_MOUNT") || !strings.Contains(string(raw), `"sandbox": "guest"`) || strings.Contains(string(raw), hostCmd) {
-		t.Fatalf("one guest entry and never the host copy's command: %s", raw)
+	got := map[string]string{}
+	for _, a := range d.Agents {
+		got[a.Name] = a.Command
+	}
+	if len(got) != 2 || !strings.HasSuffix(got["fake"], "/fakeagent") || !strings.Contains(got["fake-sandbox"], "BNBLOC_MOUNT") {
+		t.Fatalf("the member's copy under its name and the guest one under its own: %s", raw)
 	}
 	if _, err := os.Stat(hostCmd); err != nil {
 		t.Errorf("the member's own copy was touched: %v", err)
 	}
 	writeInUse(t, svc, time.Now(), true) // the core has said no room runs it
-	if err := do(t, svc, "fake", ActRemove); err != nil {
+	if err := do(t, svc, "fake-sandbox", ActRemove); err != nil {
 		t.Fatal(err)
 	}
-	if d, ok := readDropIn(t, svc); ok && len(d.Agents) != 0 {
-		t.Errorf("with the sandbox copy removed nothing is registered: %+v", d.Agents)
+	d, _ = readDropIn(t, svc)
+	if len(d.Agents) != 1 || d.Agents[0].Name != "fake" || !strings.HasSuffix(d.Agents[0].Command, "/fakeagent") {
+		t.Errorf("with the sandbox copy removed the member's copy is still registered: %+v", d.Agents)
 	}
 	if _, err := os.Stat(hostCmd); err != nil {
 		t.Errorf("the member's own copy was touched by the remove: %v", err)
+	}
+}
+
+// A sandbox install recorded under the id of an agent's computer line (how one was kept before each
+// place had a line) is forgotten at start, with the folder nothing would show any more: no migration.
+func TestAnOldSandboxRecordUnderTheComputerLinesIdIsForgotten(t *testing.T) {
+	fakeNPM(t)
+	reg := newSandboxRegistry(t)
+	reg.publish(t, "2.0.0")
+	svc := bothService(t, reg)
+	old := svc.sandboxStore().versionDir("fake", "2.0.0")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.mutate(func(st *State) {
+		st.Agents["fake"] = &AgentState{Version: "2.0.0", Method: sandboxMethod, Registered: true}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if v := view(svc, "fake"); v.Managed != nil || v.Registered {
+		t.Errorf("the computer line shows an install that is not on this computer: %+v", v)
+	}
+	if _, err := os.Stat(svc.sandboxStore().agentDir("fake")); err == nil {
+		t.Error("the orphan folder is left in the sandbox's store")
+	}
+	// A real install of the computer line is never touched.
+	if err := svc.mutate(func(st *State) { st.Agents["fake"] = &AgentState{Version: "1.0.0", Method: "npm"} }); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.managedVersion("fake"); got != "1.0.0" {
+		t.Errorf("a computer install was forgotten: %q", got)
 	}
 }

@@ -51,6 +51,10 @@ type Service struct {
 	RegistryURL string
 	// PyPIURL is the Python Package Index's JSON API (https only; "" = DefaultPyPI).
 	PyPIURL string
+	// ReleaseHost is the host release pages and files are fetched from ("" = github.com; https only).
+	ReleaseHost string
+	// releaseAssetOK replaces the rule for which redirect targets may serve a release's files (tests).
+	releaseAssetOK func(host string) bool
 	// PyIndexURL is the simple index pip installs from ("" = pip's own default,
 	// the Python Package Index): an organization's mirror.
 	PyIndexURL string
@@ -103,7 +107,34 @@ func (s *Service) Init() error {
 	s.mu.Unlock()
 	s.Store.SweepPartials()
 	s.loadSettings()
+	s.dropSandboxRecordsOfTheComputerLine()
 	return nil
+}
+
+// dropSandboxRecordsOfTheComputerLine forgets a sandbox install recorded under the id of an agent's
+// computer line, which is how one was kept before an agent had a line for each place. There is no
+// migration (nothing is launched yet): the record goes, and the folder it names in the sandbox's store,
+// which nothing would show or remove any more, with it (a running room keeps its files: its tree is
+// made of hard links).
+func (s *Service) dropSandboxRecordsOfTheComputerLine() {
+	var drop []string
+	s.mu.Lock()
+	for id, a := range s.state.Agents {
+		if e, ok := s.cat().Entry(id); ok && a != nil && a.Method == sandboxMethod && !e.isSandboxLine() {
+			drop = append(drop, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, id := range drop {
+		_ = s.mutate(func(st *State) { delete(st.Agents, id) })
+		if s.MountRoot != "" {
+			_ = os.RemoveAll(s.sandboxStore().agentDir(id))
+		}
+		log.Printf("agent-manager: forgot the sandbox install recorded under %q: the sandbox copy is its own line now (%s-sandbox); install it again there", id, id)
+	}
+	if len(drop) > 0 {
+		_ = s.writeRegistration()
+	}
 }
 
 func (s *Service) loadSettings() {
@@ -197,7 +228,7 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) CheckAll(ctx context.Context) {
 	for i := range s.cat().Agents {
 		e := &s.cat().Agents[i]
-		if e.RunsHere() && e.packageIn(s.checkPlacement(e)) != "" {
+		if e.RunsHere() && e.hasVersionSource(s.checkPlacement(e)) {
 			if err := s.check(ctx, e); err != nil {
 				log.Printf("agent-manager: check %s: %v", e.ID, err)
 			}
@@ -217,7 +248,7 @@ func (s *Service) autoUpdate() {
 	}
 	for i := range s.cat().Agents {
 		e := &s.cat().Agents[i]
-		if s.placementOf(e.ID) == PlaceSandbox {
+		if e.isSandboxLine() {
 			continue // a conversation resumes with the new version: only on a click
 		}
 		v := s.agentView(e)
@@ -358,7 +389,7 @@ func (s *Service) gate(e *Entry) error {
 		return fmt.Errorf("%s does not run on this operating system", e.Name)
 	}
 	s.mu.Lock()
-	ok := s.Settings.Allows(e.ID)
+	ok := s.Settings.Allows(e.settingsID())
 	s.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("your organization does not offer %s", e.Name)
@@ -368,7 +399,7 @@ func (s *Service) gate(e *Entry) error {
 
 func (s *Service) perform(ctx context.Context, op *operation, e *Entry, action string) error {
 	if action == ActCheck {
-		if e.packageIn(s.checkPlacement(e)) == "" {
+		if !e.hasVersionSource(s.checkPlacement(e)) {
 			return fmt.Errorf("%s has no place to look for a newer version", e.Name)
 		}
 		return s.check(ctx, e)
@@ -405,10 +436,7 @@ func (s *Service) target(ctx context.Context, e *Entry) (string, error) {
 // checkPlacement is the placement a look for a newer version is about: where
 // the manager's install lives, else this computer (the sandbox only once chosen).
 func (s *Service) checkPlacement(e *Entry) string {
-	if p := s.placementOf(e.ID); p != "" {
-		return p
-	}
-	if e.Package() == "" && e.Sandbox != nil {
+	if e.isSandboxLine() {
 		return PlaceSandbox
 	}
 	return PlaceHost
@@ -416,10 +444,13 @@ func (s *Service) checkPlacement(e *Entry) string {
 
 func (s *Service) targetIn(ctx context.Context, e *Entry, placement string) (string, error) {
 	s.mu.Lock()
-	pin, hold := s.Settings.Pinned[e.ID], s.Settings.HoldDays
+	pin, hold := s.Settings.Pinned[e.settingsID()], s.Settings.HoldDays
 	s.mu.Unlock()
 	if pin != "" {
 		return pin, nil
+	}
+	if placement == PlaceSandbox && e.Sandbox != nil && e.Sandbox.Release != nil {
+		return s.latestFromRelease(ctx, e.Sandbox.Release, hold)
 	}
 	pkg := e.packageIn(placement)
 	if pkg == "" {
@@ -483,13 +514,13 @@ func (s *Service) doInstall(ctx context.Context, op *operation, e *Entry) error 
 		}
 		return errors.New("the manager does not install " + e.Name)
 	}
+	if e.isSandboxLine() {
+		return fmt.Errorf("%s lives in your sandbox: install it there", e.Name)
+	}
 	if cur, _ := s.managedVersion(e.ID); cur != "" {
-		if s.placementOf(e.ID) == PlaceSandbox {
-			return fmt.Errorf("%s %s is already installed in your sandbox; remove it first to put it on this computer", e.Name, cur)
-		}
 		return fmt.Errorf("%s %s is already installed; use update", e.Name, cur)
 	}
-	if s.sandboxOnly(e.ID) {
+	if s.sandboxOnly(e) {
 		return fmt.Errorf("your organization installs %s only in the sandbox", e.Name)
 	}
 	v, err := s.target(ctx, e)
@@ -547,7 +578,7 @@ func (s *Service) updateManaged(ctx context.Context, op *operation, e *Entry, cu
 		op.logf("%s is already at %s", e.Name, cur)
 		return nil
 	}
-	if s.placementOf(e.ID) == PlaceSandbox {
+	if e.isSandboxLine() {
 		return s.updateInSandbox(ctx, op, e, cur, v)
 	}
 	if e.Install == nil {
@@ -573,7 +604,7 @@ func (s *Service) updateManaged(ctx context.Context, op *operation, e *Entry, cu
 func (s *Service) updateExternal(ctx context.Context, op *operation, e *Entry, target string) error {
 	s.mu.Lock()
 	d := s.det[e.ID]
-	pin := s.Settings.Pinned[e.ID]
+	pin := s.Settings.Pinned[e.settingsID()]
 	s.mu.Unlock()
 	if d.Command == "" {
 		return fmt.Errorf("%s was not found on this computer", e.Name)
@@ -658,7 +689,7 @@ func (s *Service) doRemove(op *operation, e *Entry) error {
 	if cur == "" {
 		return errors.New("the manager did not install this agent and does not remove it")
 	}
-	if s.placementOf(e.ID) == PlaceSandbox {
+	if e.isSandboxLine() {
 		if s.heldInSandbox(e) {
 			return fmt.Errorf("a room may still be running %s: removing it now would end that conversation. Remove it when no room uses it (the app restarting ends them)", e.Name)
 		}
@@ -690,7 +721,7 @@ func (s *Service) doRegister(op *operation, e *Entry, on bool) error {
 		if a := s.state.Agents[e.ID]; a != nil {
 			cur = a.Version
 		}
-		have := cur != "" || s.det[e.ID].Command != ""
+		have := cur != "" || (!e.isSandboxLine() && s.det[e.ID].Command != "")
 		s.mu.Unlock()
 		if !have {
 			return fmt.Errorf("%s is not installed", e.Name)

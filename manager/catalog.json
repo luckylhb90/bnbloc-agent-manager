@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-29.3",
+  "version": "2026-10-29.4",
   "agents": [
     {
       "id": "claude",
@@ -531,7 +531,20 @@
       },
       "signIn": "Run `omp login` and sign in.",
       "sandbox": {
-        "unavailable": "omp installs with Homebrew and has no sandbox build."
+        "method": "release",
+        "bin": "omp",
+        "release": {
+          "repo": "can1357/oh-my-pi",
+          "tagPrefix": "v",
+          "assets": {
+            "arm64": "omp-linux-arm64",
+            "x64": "omp-linux-x64"
+          },
+          "sums": "SHA256SUMS.txt"
+        },
+        "approxMB": 240,
+        "signIn": "key",
+        "note": "The compiled Linux build from omp's own release, checked against the release's checksums; no install script runs. It keeps its own data in the sandbox and never touches the omp on this computer."
       }
     },
     {

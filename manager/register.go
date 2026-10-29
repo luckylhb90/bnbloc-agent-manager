@@ -45,11 +45,11 @@ func (s *Service) registration() dropIn {
 	for i := range s.cat().Agents {
 		e := &s.cat().Agents[i]
 		a := s.state.Agents[e.ID]
-		if a == nil || !a.Registered || !e.RunsHere() || !set.Allows(e.ID) {
+		if a == nil || !a.Registered || !e.RunsHere() || !set.Allows(e.settingsID()) {
 			continue
 		}
-		if placementIn(a) == PlaceSandbox {
-			if r := e.sandboxRegister(); r != nil && s.SandboxReady() {
+		if e.isSandboxLine() {
+			if r := e.sandboxRegister(); r != nil && a.Version != "" && s.SandboxReady() {
 				out.Agents = append(out.Agents, dropInEntry{Name: r.Name, Command: guestCommand(e), Args: r.Args, Sandbox: "guest", Profile: r.Profile, Permissions: r.Permissions})
 			}
 			continue

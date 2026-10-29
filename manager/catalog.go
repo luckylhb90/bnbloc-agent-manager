@@ -62,6 +62,97 @@ type Entry struct {
 	Register *Register `json:"register,omitempty"`
 	// SignIn is shown after an install: each agent keeps its own sign-in.
 	SignIn string `json:"signIn,omitempty"`
+	// SandboxOf is, on the sandbox line of an agent that also runs on this computer, the id of
+	// the agent it belongs to. Made when the catalog is read (addSandboxTwins), never written in
+	// a catalog file: the two lines have their own state, version, store folder and registration.
+	SandboxOf string `json:"-"`
+}
+
+// sandboxTwinSuffix ends the id and the registered name of an agent's sandbox line.
+const sandboxTwinSuffix = "-sandbox"
+
+// hasHostSide reports whether the agent can be on this computer at all: an agent with none
+// (OpenCode 2) lives only in the sandbox and keeps one line.
+func (e *Entry) hasHostSide() bool {
+	return e.Install != nil || e.InstallRun != nil || len(e.Found) > 0 || e.Detect.Command != ""
+}
+
+// isSandboxLine reports whether the entry is where an agent lives in the sandbox: the twin of
+// an agent that also runs on this computer, or an agent that has no other side.
+func (e *Entry) isSandboxLine() bool {
+	return e.SandboxOf != "" || (e.Sandbox != nil && !e.hasHostSide())
+}
+
+// baseName is the agent's own name: what a sentence about it says, whichever line it is on.
+func (e *Entry) baseName() string {
+	if e.SandboxOf != "" {
+		return strings.TrimSuffix(e.Name, " (sandbox)")
+	}
+	return e.Name
+}
+
+// settingsID is the id the organization's settings name the agent by: both lines of an agent
+// are one agent to them (offered, pinned, sandbox-only).
+func (e *Entry) settingsID() string {
+	if e.SandboxOf != "" {
+		return e.SandboxOf
+	}
+	return e.ID
+}
+
+// sandboxTwin is the sandbox line of an agent that also runs on this computer: the same package
+// and version source, none of the detection of an install on this computer, and its own
+// registered name. Its Install stays (it says how the package is built: the pip and npm
+// methods read it) but is never run on this computer for this line.
+func (e *Entry) sandboxTwin() Entry {
+	t := *e
+	t.ID = e.ID + sandboxTwinSuffix
+	t.Name = e.Name + " (sandbox)"
+	t.SandboxOf = e.ID
+	t.Detect, t.Found, t.Update, t.InstallRun, t.InstallHint = Detect{}, nil, nil, nil, ""
+	t.Register = nil
+	sb := *e.Sandbox
+	if sb.Unavailable == "" {
+		if r := e.sandboxRegister(); r != nil {
+			rc := *r
+			rc.Name += sandboxTwinSuffix
+			t.Register = &rc
+		}
+		sb.Register = nil
+	}
+	t.Sandbox = &sb
+	return t
+}
+
+// addSandboxTwins gives every agent that runs on this computer and can be put in the sandbox a
+// second line, right after it. An id or registered name a twin would take twice is refused.
+func (c *Catalog) addSandboxTwins() error {
+	out := make([]Entry, 0, len(c.Agents)*2)
+	taken := map[string]bool{}
+	for _, e := range c.Agents {
+		taken[e.ID] = true
+		if e.Register != nil {
+			taken["name:"+e.Register.Name] = true
+		}
+	}
+	for i := range c.Agents {
+		e := &c.Agents[i]
+		out = append(out, *e)
+		if e.Sandbox == nil || !e.hasHostSide() {
+			continue
+		}
+		t := e.sandboxTwin()
+		if taken[t.ID] || (t.Register != nil && taken["name:"+t.Register.Name]) {
+			return fmt.Errorf("catalog: agent %q: its sandbox line %q (or its registered name) is already taken", e.ID, t.ID)
+		}
+		taken[t.ID] = true
+		if t.Register != nil {
+			taken["name:"+t.Register.Name] = true
+		}
+		out = append(out, t)
+	}
+	c.Agents = out
+	return nil
 }
 
 // Run is a command with its arguments.
@@ -199,7 +290,8 @@ func (c *Catalog) With(extra []byte) (*Catalog, error) {
 	if err := dec.Decode(&more); err != nil {
 		return nil, fmt.Errorf("catalog: %w", err)
 	}
-	raw, err := json.Marshal(Catalog{Version: c.Version + "+" + more.Version, Agents: append(append([]Entry(nil), c.Agents...), more.Agents...)})
+	base := slices.DeleteFunc(slices.Clone(c.Agents), func(e Entry) bool { return e.SandboxOf != "" }) // made again by ParseCatalog
+	raw, err := json.Marshal(Catalog{Version: c.Version + "+" + more.Version, Agents: append(base, more.Agents...)})
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +333,9 @@ func ParseCatalog(raw []byte) (*Catalog, error) {
 		if !ok || e.For == e.ID || parent.For != "" {
 			return nil, fmt.Errorf("catalog: agent %q is for %q, which is not an agent of its own", e.ID, e.For)
 		}
+	}
+	if err := c.addSandboxTwins(); err != nil {
+		return nil, err
 	}
 	return &c, nil
 }
@@ -368,6 +463,15 @@ func (c *Catalog) Entry(id string) (*Entry, bool) {
 // RunsHere reports whether the agent runs on this operating system.
 func (e *Entry) RunsHere() bool {
 	return len(e.Platforms) == 0 || slices.Contains(e.Platforms, runtime.GOOS)
+}
+
+// hasVersionSource says whether a look for the newest version can be made: a package in an
+// index, or a release page.
+func (e *Entry) hasVersionSource(placement string) bool {
+	if placement == PlaceSandbox && e.Sandbox != nil && e.Sandbox.Release != nil {
+		return true
+	}
+	return e.packageIn(placement) != ""
 }
 
 // latestFrom is the index the newest version of the agent in a placement is read

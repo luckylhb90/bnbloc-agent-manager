@@ -780,13 +780,13 @@ func pipSandboxService(t *testing.T, idx *httptest.Server, api *httptest.Server)
 func TestAPythonAgentIsUnpackedForTheGuestAndRegisteredAsAGuestAgent(t *testing.T) {
 	needPython(t)
 	svc := pipSandboxService(t, pyIndex(t, depWheel, appWheel), pypiAPI(t, "2.0.0"))
-	if err := do(t, svc, "fakepy", ActInstallSandbox); err != nil {
+	if err := do(t, svc, "fakepy-sandbox", ActInstallSandbox); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.WriteRegistration(); err != nil {
 		t.Fatal(err)
 	}
-	dir := svc.sandboxStore().versionDir("fakepy", "2.0.0")
+	dir := svc.sandboxStore().versionDir("fakepy-sandbox", "2.0.0")
 	for _, f := range []string{"site/fakepy/cli.py", "site/fakedep/__init__.py", "data/locales/en.yaml", "requirements.lock", "bin/fakepy"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s: %v", f, err)
@@ -805,17 +805,17 @@ func TestAPythonAgentIsUnpackedForTheGuestAndRegisteredAsAGuestAgent(t *testing.
 		t.Error("a finished install leaves no partial folder")
 	}
 	d, ok := readDropIn(t, svc)
-	if !ok || len(d.Agents) != 1 || d.Agents[0].Command != "$BNBLOC_MOUNT_AGENT_FAKEPY/bin/fakepy" || strings.Join(d.Agents[0].Args, " ") != "acp" {
+	if !ok || len(d.Agents) != 1 || d.Agents[0].Command != "$BNBLOC_MOUNT_AGENT_FAKEPY_SANDBOX/bin/fakepy" || strings.Join(d.Agents[0].Args, " ") != "acp" {
 		t.Fatalf("the ACP core's entry: %+v", d)
 	}
 	raw, _ := os.ReadFile(filepath.Join(svc.ACPHome, DropInDir, DropInFile))
 	if !strings.Contains(string(raw), `"sandbox": "guest"`) {
 		t.Errorf("the entry must be a guest agent, never run on this computer: %s", raw)
 	}
-	if ms := readMounts(t, svc); len(ms) != 1 || ms[0].Host != dir || !ms[0].PerSpace || ms[0].Env != "BNBLOC_MOUNT_AGENT_FAKEPY" {
+	if ms := readMounts(t, svc); len(ms) != 1 || ms[0].Host != dir || !ms[0].PerSpace || ms[0].Env != "BNBLOC_MOUNT_AGENT_FAKEPY_SANDBOX" {
 		t.Errorf("the bridge's descriptor: %+v", ms)
 	}
-	v := view(svc, "fakepy")
+	v := view(svc, "fakepy-sandbox")
 	if !v.Sandbox || v.Managed == nil || v.Managed.Version != "2.0.0" || v.Managed.SizeBytes == 0 {
 		t.Errorf("the row: %+v", v)
 	}
@@ -832,29 +832,34 @@ func TestASandboxInstallOfAWheelThatCouldRunCodeLeavesNothing(t *testing.T) {
 	bad := appWheel
 	bad.files = map[string]string{"fakepy/__init__.py": "", "fakepy/cli.py": "def main(): pass\n", "evil.pth": "import os\n"}
 	svc := pipSandboxService(t, pyIndex(t, depWheel, bad), pypiAPI(t, "2.0.0"))
-	err := do(t, svc, "fakepy", ActInstallSandbox)
+	err := do(t, svc, "fakepy-sandbox", ActInstallSandbox)
 	if err == nil || !strings.Contains(err.Error(), ".pth") {
 		t.Fatalf("err = %v, want a refusal that names the .pth file", err)
 	}
-	entries, _ := os.ReadDir(svc.sandboxStore().agentDir("fakepy"))
+	entries, _ := os.ReadDir(svc.sandboxStore().agentDir("fakepy-sandbox"))
 	if len(entries) != 0 {
 		t.Errorf("a failed install left %v", entries)
 	}
-	if v := view(svc, "fakepy"); v.Managed != nil || v.Registered {
+	if v := view(svc, "fakepy-sandbox"); v.Managed != nil || v.Registered {
 		t.Errorf("a failed install is not recorded: %+v", v)
 	}
 }
 
-// An agent lives in one place: a copy on this computer and one in the sandbox would
-// register under one name. Installing it here while the sandbox has it, and the other
-// way round, is refused with the reason.
-func TestAPythonAgentLivesInOnePlace(t *testing.T) {
+// The two lines of a Python agent are separate: the sandbox line installs into the sandbox's own
+// store and never into this computer's, and an install on the wrong line is refused with the reason.
+func TestAPythonAgentsTwoLinesAreSeparate(t *testing.T) {
 	needPython(t)
 	svc := pipSandboxService(t, pyIndex(t, depWheel, appWheel), pypiAPI(t, "2.0.0"))
-	if err := do(t, svc, "fakepy", ActInstallSandbox); err != nil {
+	if err := do(t, svc, "fakepy-sandbox", ActInstallSandbox); err != nil {
 		t.Fatal(err)
 	}
-	if err := do(t, svc, "fakepy", ActInstall); err == nil || !strings.Contains(err.Error(), "sandbox") {
-		t.Fatalf("install on this computer while it is in the sandbox: %v", err)
+	if err := do(t, svc, "fakepy-sandbox", ActInstall); err == nil || !strings.Contains(err.Error(), "sandbox") {
+		t.Fatalf("a computer install of the sandbox line: %v", err)
+	}
+	if v := view(svc, "fakepy"); v.Managed != nil || v.Registered {
+		t.Errorf("the computer line has no install of its own: %+v", v)
+	}
+	if err := do(t, svc, "fakepy", ActInstallSandbox); err == nil {
+		t.Error("a sandbox install of the computer line was accepted")
 	}
 }
