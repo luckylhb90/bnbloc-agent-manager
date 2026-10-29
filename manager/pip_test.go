@@ -619,7 +619,10 @@ func TestShippedCatalogInstallsHermesFromWheels(t *testing.T) {
 	if !ok {
 		t.Fatal("no hermes")
 	}
-	if e.Install == nil || e.Install.Method != "pip" || e.Install.Package != "hermes-agent" || strings.Join(e.Install.Extras, ",") != "acp" {
+	if e.Install == nil || e.Install.Method != "pip" || e.Install.Package != "hermes-agent" || strings.Join(e.Install.Extras, ",") != "acp,anthropic" {
+		// acp: its ACP server. anthropic: a model served over the Anthropic protocol (the company
+		// route serves Claude models that way) fails at its first turn without it: "The 'anthropic'
+		// package is required for the Anthropic provider" (seen 2026-10-29, a room's first turn).
 		t.Fatalf("install = %+v", e.Install)
 	}
 	if e.InstallHint != "" {
