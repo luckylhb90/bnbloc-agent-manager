@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-29.2",
+  "version": "2026-10-29.3",
   "agents": [
     {
       "id": "claude",
@@ -585,7 +585,8 @@
         "package": "hermes-agent",
         "extras": [
           "acp",
-          "anthropic"
+          "anthropic",
+          "mcp"
         ],
         "bin": "hermes",
         "python": {

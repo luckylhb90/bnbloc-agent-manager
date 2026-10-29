@@ -619,10 +619,13 @@ func TestShippedCatalogInstallsHermesFromWheels(t *testing.T) {
 	if !ok {
 		t.Fatal("no hermes")
 	}
-	if e.Install == nil || e.Install.Method != "pip" || e.Install.Package != "hermes-agent" || strings.Join(e.Install.Extras, ",") != "acp,anthropic" {
+	if e.Install == nil || e.Install.Method != "pip" || e.Install.Package != "hermes-agent" || strings.Join(e.Install.Extras, ",") != "acp,anthropic,mcp" {
 		// acp: its ACP server. anthropic: a model served over the Anthropic protocol (the company
 		// route serves Claude models that way) fails at its first turn without it: "The 'anthropic'
 		// package is required for the Anthropic provider" (seen 2026-10-29, a room's first turn).
+		// mcp: without it Hermes's MCP client is a no-op that logs at debug level, so the room's
+		// tools and every host-run tool silently never reach the agent (a real guest run: the host
+		// tool received initialize from the bridge and nothing from Hermes).
 		t.Fatalf("install = %+v", e.Install)
 	}
 	if e.InstallHint != "" {
