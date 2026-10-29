@@ -740,16 +740,22 @@ func TestEveryAgentOfTheCatalogHasItsTwoLinesAndSaysWhyOneIsOff(t *testing.T) {
 			}
 		}
 	}
-	// OpenCode 1.x and OpenCode 2 are two products. OpenCode 2 has no side on this computer: one
-	// line, in the sandbox, and no twin.
-	if _, ok := index["opencode2"]; !ok || index["opencode2-sandbox"] != 0 {
-		t.Errorf("OpenCode 2 is one line: %v", index)
+	// No agent is special: every agent of the catalog that has a sandbox build has both lines, the
+	// computer's with an install of its own, OpenCode 1.x and OpenCode 2 alike (two products, each
+	// with its own two lines).
+	for _, id := range []string{"opencode", "opencode2"} {
+		e, ok := cat.Entry(id)
+		if !ok || e.Install == nil || !e.hasHostSide() || e.isSandboxLine() {
+			t.Errorf("%s has no line of its own on this computer", id)
+		}
+		if _, ok := index[id+"-sandbox"]; !ok {
+			t.Errorf("%s has no sandbox line: %v", id, index)
+		}
 	}
-	if _, ok := index["opencode-sandbox"]; !ok {
-		t.Errorf("OpenCode 1.x has a sandbox line: %v", index)
-	}
-	if e, _ := cat.Entry("opencode2"); e.sandboxRefusal() != "" || e.Install != nil || !e.isSandboxLine() {
-		t.Error("OpenCode 2 is a sandbox agent and is offered there")
+	for _, e := range cat.Agents {
+		if e.SandboxOf == "" && e.Sandbox != nil && !e.hasHostSide() {
+			t.Errorf("%s lives only in the sandbox: no agent is special, give it its own line on this computer", e.ID)
+		}
 	}
 }
 

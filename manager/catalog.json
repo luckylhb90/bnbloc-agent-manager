@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-29.4",
+  "version": "2026-10-29.5",
   "agents": [
     {
       "id": "claude",
@@ -220,14 +220,23 @@
         "bin": "bin/opencode",
         "latest": "@opencode/cli",
         "approxMB": 225,
-        "note": "It works with free models without signing in. It keeps its own data and never touches OpenCode 1.x."
+        "note": "It works with free models without signing in."
       },
       "latest": {
         "from": "npm",
         "package": "@opencode/cli"
       },
+      "install": {
+        "method": "npm",
+        "package": "@opencode/cli",
+        "bin": "opencode2",
+        "ignoreScripts": false
+      },
       "detect": {
-        "command": ""
+        "command": "opencode2",
+        "args": [
+          "--version"
+        ]
       },
       "register": {
         "name": "opencode2",
