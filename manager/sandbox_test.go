@@ -737,30 +737,43 @@ func TestEveryAgentOfTheCatalogOffersTheSamePlacesAndSaysWhyOneIsOff(t *testing.
 	}
 }
 
-// An agent lives in one place. A copy the member installed themselves counts: with
-// it on this computer the sandbox is not offered (and refuses), because two copies
-// would register under one name and the ACP core would keep one of them, so a room
-// believed to be isolated could run on this computer.
-func TestAnAgentAlreadyOnThisComputerCannotAlsoBePutInTheSandbox(t *testing.T) {
+// A copy the member installed themselves does not stop the sandbox copy. The manager
+// writes one registration per agent, from where its own install lives: while the
+// sandbox copy is installed the drop-in holds only the guest command (never the host
+// copy's, so a room believed isolated never runs on this computer), the host copy is
+// left exactly as it is, and with the sandbox copy removed nothing is registered.
+func TestAnAgentAlreadyOnThisComputerCanAlsoBePutInTheSandbox(t *testing.T) {
 	fakeNPM(t)
 	reg := newSandboxRegistry(t)
 	reg.publish(t, "2.0.0")
 	svc := bothService(t, reg)
-	foundAgent(t, "fakeagent", "somebin", "1.0.0")
+	hostCmd := foundAgent(t, "fakeagent", "somebin", "1.0.0")
 	svc.RefreshDetected(context.Background())
 
 	v := view(svc, "fake")
 	sb := placementOf(v, PlaceSandbox)
-	if v.Can.InstallSandbox || sb == nil || sb.Can || !strings.Contains(sb.Reason, "already on this computer") || !strings.Contains(sb.Reason, "remove that copy first") {
-		t.Fatalf("with a copy on this computer the sandbox is off and says why: can %+v placement %+v", v.Can, sb)
+	if !v.Can.InstallSandbox || sb == nil || !sb.Can || !strings.Contains(sb.Note, "is left as it is") {
+		t.Fatalf("the sandbox is offered and says the copy stays: can %+v placement %+v", v.Can, sb)
 	}
-	if err := do(t, svc, "fake", ActInstallSandbox); err == nil || !strings.Contains(err.Error(), "already on this computer") {
-		t.Fatalf("refused, not only hidden: %v", err)
+	if err := do(t, svc, "fake", ActInstallSandbox); err != nil {
+		t.Fatalf("install in the sandbox: %v", err)
 	}
-	if entries, _ := os.ReadDir(svc.sandboxStore().agentDir("fake")); len(entries) != 0 {
-		t.Errorf("nothing was installed: %v", entries)
+	raw, _ := os.ReadFile(filepath.Join(svc.ACPHome, DropInDir, DropInFile))
+	d, _ := readDropIn(t, svc)
+	if len(d.Agents) != 1 || !strings.Contains(d.Agents[0].Command, "BNBLOC_MOUNT") || !strings.Contains(string(raw), `"sandbox": "guest"`) || strings.Contains(string(raw), hostCmd) {
+		t.Fatalf("one guest entry and never the host copy's command: %s", raw)
 	}
-	if ms := readMounts(t, svc); len(ms) != 0 {
-		t.Errorf("the sandbox was given nothing: %+v", ms)
+	if _, err := os.Stat(hostCmd); err != nil {
+		t.Errorf("the member's own copy was touched: %v", err)
+	}
+	writeInUse(t, svc, time.Now(), true) // the core has said no room runs it
+	if err := do(t, svc, "fake", ActRemove); err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := readDropIn(t, svc); ok && len(d.Agents) != 0 {
+		t.Errorf("with the sandbox copy removed nothing is registered: %+v", d.Agents)
+	}
+	if _, err := os.Stat(hostCmd); err != nil {
+		t.Errorf("the member's own copy was touched by the remove: %v", err)
 	}
 }

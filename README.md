@@ -64,6 +64,16 @@ desktop relay ──loopback + per-launch bearer──▶ bnbloc-agent-manager
   rooms cost one copy on disk. The ACP core launches it inside the sandbox
   (`"sandbox": "guest"`), never on your computer. It needs the desktop app with the
   sandbox on.
+  A copy of the agent the member put on this computer themselves (found, "installed
+  by you") does not stop the sandbox choice: the manager writes one registration per
+  agent, from where *its own* install lives, so while the sandbox copy is installed
+  the ACP core gets only the guest command (never the host copy's: a room believed
+  isolated never runs on this computer), the member's copy is left exactly as it is,
+  never started for a room and never removed, and removing the sandbox copy leaves
+  the agent unregistered until it is enabled again. (Until 0.1.17 the sandbox choice
+  was greyed out in that case; a member with Hermes already on their computer could
+  not use it in the sandbox.) A same-named entry in the member's own `agents.json`
+  still wins on the name, as for every agent.
 
   A catalog entry's `sandbox` block says how: `method` (`tarball`, `npm` or `pip`),
   `package`, `bin`, `latest`, `python` and `dataEnv` (pip), `approxMB`, `note`, `register` (when the sandbox launch

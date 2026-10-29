@@ -661,9 +661,6 @@ func (s *Service) installInSandbox(ctx context.Context, op *operation, e *Entry)
 		}
 		return fmt.Errorf("%s %s is already installed %s; remove it first to put it somewhere else", e.Name, cur, where)
 	}
-	if why := s.alreadyOnThisComputer(e); why != "" {
-		return errors.New(why)
-	}
 	v, err := s.targetIn(ctx, e, PlaceSandbox)
 	if err != nil {
 		return err
@@ -700,19 +697,22 @@ func (s *Service) updateInSandbox(ctx context.Context, op *operation, e *Entry, 
 	return nil
 }
 
-// alreadyOnThisComputer is why an agent cannot be put in the sandbox while a copy of
-// it is on this computer ("" when none is): an agent lives in one place. Two copies
-// would register under one name, the ACP core would keep one of them and which is
-// not decided by the member, so a room they believed was isolated could run on this
-// computer. The copy the member installed is theirs; the manager does not remove it.
-func (s *Service) alreadyOnThisComputer(e *Entry) string {
+// copyOnThisComputer is the note for an agent the member has on this computer
+// that the manager did not install ("" when there is none). It does not stop the
+// sandbox copy: the manager writes one registration per agent, from where its own
+// install lives, so a room runs the sandbox copy while it is installed and the
+// member's copy is left exactly as it is (never started for a room, never
+// removed). When the sandbox copy is removed the agent is not registered at all
+// until the member enables one again. A same-named entry in the member's own
+// agents.json is another matter: it wins on the name (Shadowed), as for any agent.
+func (s *Service) copyOnThisComputer(e *Entry) string {
 	s.mu.Lock()
 	d := s.det[e.ID]
 	s.mu.Unlock()
 	if d.Command == "" {
 		return ""
 	}
-	return e.Name + " is already on this computer (" + d.Path + "). An agent lives in one place: remove that copy first to use it in the sandbox."
+	return "The copy on this computer (" + d.Path + ") is left as it is; rooms use this one while it is installed."
 }
 
 // sandboxOnly reports an agent the organization offers only in the sandbox.

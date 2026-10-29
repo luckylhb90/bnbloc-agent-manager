@@ -239,7 +239,7 @@ func (s *Service) agentView(e *Entry) AgentView {
 	}
 
 	v.Can.Install = (e.Install != nil || e.InstallRun != nil) && !managed && v.External == nil && !busy && !sandboxOnly
-	v.Can.InstallSandbox = e.Sandbox != nil && e.sandboxRefusal() == "" && s.alreadyOnThisComputer(e) == "" && s.SandboxReady() && !managed && !busy
+	v.Can.InstallSandbox = e.Sandbox != nil && e.sandboxRefusal() == "" && s.SandboxReady() && !managed && !busy
 	if e.InstallRun != nil && v.Can.Install {
 		v.InstallCommand = e.InstallRun.Command + " " + strings.Join(e.InstallRun.Args, " ")
 	}
@@ -386,10 +386,11 @@ func (s *Service) placements(e *Entry, v *AgentView, sandboxOnly bool) []Placeme
 		if e.Sandbox.SignIn == "key" {
 			sb.Note += " " + sandboxKeyNote
 		}
+		if why := s.copyOnThisComputer(e); why != "" {
+			sb.Note += " " + why
+		}
 	case e.sandboxRefusal() != "":
 		sb.Reason = e.sandboxRefusal()
-	case s.alreadyOnThisComputer(e) != "":
-		sb.Reason = s.alreadyOnThisComputer(e)
 	case !s.SandboxReady():
 		sb.Reason = "Needs the desktop app with the sandbox on."
 	}
